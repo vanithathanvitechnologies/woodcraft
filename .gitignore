@@ -1,0 +1,41 @@
+# Dependencies & Package Caches
+node_modules/
+**/.pub-cache/
+**/.pub/
+**/.dart_tool/
+**/.flutter-plugins-dependencies
+
+# Build Outputs & Native Caches
+**/build/
+**/.gradle/
+adminpanel/dist/
+adminpanel/dist-ssr/
+**/android/local.properties
+**/android/app/debug/
+**/android/app/profile/
+**/android/app/release/
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+**/ios/Flutter/.last_build_id
+
+# IDE & OS Files
+**/.idea/
+*.iml
+*.ipr
+*.iws
+.DS_Store
+Thumbs.db
+*.swp
+*.tmp
+
+# Secrets & Local Environment Files
+backend/.env
+*.local
+*.jks
+*.keystore
+
+# Large Duplicate Archive Backups & Sync Logs
+php_api/uploads_live_photos.zip
+php_api/uploads/ai-outputs.zip
+auto_git_sync.log
+*.log
