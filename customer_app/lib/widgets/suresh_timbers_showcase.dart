@@ -360,33 +360,6 @@ class SureshTimbersShowcaseSection extends StatelessWidget {
     'Tamil Nadu Warehouse',
   ];
 
-  static const _testimonials = [
-    (
-      'Muthumani',
-      'Principal Architect • RK Architects',
-      'Luxury Villa Complex',
-      'Suresh Timbers has been our go-to supplier for over 10 years. Their consistency in quality and on-time delivery has made them an invaluable partner.',
-    ),
-    (
-      'Siva Kumar',
-      'Interior Designer • Wilson Interiors',
-      'Heritage Hotel Interiors',
-      'The custom woodwork they provided for our 5-star hotel project exceeded all expectations. The attention to detail and craftsmanship is outstanding.',
-    ),
-    (
-      'Mahendran',
-      'Project Manager • Urban Developers',
-      'Residential Complex',
-      'From material selection to final installation, their team provided exceptional support throughout our residential project. Highly recommended!',
-    ),
-    (
-      'Santhosh',
-      'Manufacturer • Chen Furniture Co.',
-      'Premium Furniture Line',
-      'The quality of timber we receive from Suresh Timbers is consistently excellent. Their expertise in wood grading and processing shows in every shipment.',
-    ),
-  ];
-
   static const _craftSteps = [
     ('01', 'Free Consultation', 'Architect guidance & wood selection'),
     ('02', 'Custom Planning', 'Exact dimensions, style & timeline'),
@@ -1077,101 +1050,7 @@ class SureshTimbersShowcaseSection extends StatelessWidget {
         ),
         const SizedBox(height: 22),
 
-        // 7. Customer & Architect Testimonials
-        _sectionHeader(
-          Icons.format_quote_rounded,
-          'What Clients Say About Us',
-          'Rated 4.9/5 with 98% repeat client retention',
-        ),
-        const SizedBox(height: 12),
-        SizedBox(
-          height: 174,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: _testimonials.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 12),
-            itemBuilder: (_, i) {
-              final (name, role, project, quote) = _testimonials[i];
-              return Container(
-                width: 280,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: SureshTimbersColors.border),
-                  boxShadow: [
-                    BoxShadow(
-                      color: SureshTimbersColors.woodDark.withValues(alpha: 0.04),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        ...List.generate(
-                          5,
-                          (_) => const Icon(Icons.star_rounded, size: 15, color: SureshTimbersColors.brass),
-                        ),
-                        const Spacer(),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: SureshTimbersColors.cream,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            project,
-                            style: const TextStyle(
-                              fontSize: 9.5,
-                              fontWeight: FontWeight.w700,
-                              color: SureshTimbersColors.woodPrimary,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Expanded(
-                      child: Text(
-                        '"$quote"',
-                        maxLines: 4,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFF47362A),
-                          fontStyle: FontStyle.italic,
-                          height: 1.38,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      name,
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w800,
-                        color: SureshTimbersColors.woodDark,
-                      ),
-                    ),
-                    Text(
-                      role,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 10.5, color: Colors.black54),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-        ),
-        const SizedBox(height: 22),
-
-        // 8. Group Companies & Royal Design Consultation CTA Card
+        // 7. Group Companies & Royal Design Consultation CTA Card
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
