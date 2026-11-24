@@ -119,14 +119,14 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     // Floating App Logo Crest
                     Positioned(
-                      bottom: -40,
+                      bottom: -34,
                       child: Container(
-                        width: 84,
-                        height: 84,
-                        padding: const EdgeInsets.all(4),
+                        width: 164,
+                        height: 68,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                         decoration: BoxDecoration(
                           color: Colors.white,
-                          borderRadius: BorderRadius.circular(20),
+                          borderRadius: BorderRadius.circular(18),
                           border: Border.all(color: const Color(0xFFFAF5EE), width: 3.5),
                           boxShadow: [
                             BoxShadow(
@@ -137,7 +137,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ],
                         ),
                         child: ClipRRect(
-                          borderRadius: BorderRadius.circular(14),
+                          borderRadius: BorderRadius.circular(12),
                           child: Image.asset(
                             'assets/images/app_logo.png',
                             fit: BoxFit.contain,

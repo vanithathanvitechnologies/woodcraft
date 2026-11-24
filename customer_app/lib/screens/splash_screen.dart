@@ -147,10 +147,10 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
         return Transform.scale(
           scale: scale,
           child: Container(
-            width: 126,
-            height: 126,
+            width: 186,
+            height: 94,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(32),
+              borderRadius: BorderRadius.circular(28),
               border: Border.all(
                 color: _brass.withValues(alpha: opacity),
                 width: 2.0,
@@ -186,8 +186,8 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
 
               // Animated Logo Crest + Expanding Golden Pulse Rings + Glossy Sheen
               SizedBox(
-                width: 220,
-                height: 220,
+                width: 280,
+                height: 180,
                 child: Stack(
                   alignment: Alignment.center,
                   children: [
@@ -197,10 +197,10 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                       builder: (_, __) {
                         final breathe = 0.16 + 0.08 * math.sin(_pulseCtrl.value * 2 * math.pi);
                         return Container(
-                          width: 168,
-                          height: 168,
+                          width: 210,
+                          height: 120,
                           decoration: BoxDecoration(
-                            shape: BoxShape.circle,
+                            borderRadius: BorderRadius.circular(40),
                             boxShadow: [
                               BoxShadow(
                                 color: _brass.withValues(alpha: breathe),
@@ -236,12 +236,12 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                         );
                       },
                       child: Container(
-                        width: 124,
-                        height: 124,
-                        padding: const EdgeInsets.all(6),
+                        width: 184,
+                        height: 92,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                         decoration: BoxDecoration(
                           color: Colors.white,
-                          borderRadius: BorderRadius.circular(30),
+                          borderRadius: BorderRadius.circular(24),
                           border: Border.all(
                             color: _brass.withValues(alpha: 0.75),
                             width: 2.5,
@@ -255,12 +255,12 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                           ],
                         ),
                         child: ClipRRect(
-                          borderRadius: BorderRadius.circular(22),
+                          borderRadius: BorderRadius.circular(16),
                           child: Stack(
                             fit: StackFit.expand,
                             children: [
                               Padding(
-                                padding: const EdgeInsets.all(6),
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                                 child: Image.asset(
                                   'assets/images/app_logo.png',
                                   fit: BoxFit.contain,

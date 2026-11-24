@@ -48,15 +48,15 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen> {
         title: Row(
           children: [
             Container(
-              width: 38,
-              height: 38,
-              padding: const EdgeInsets.all(2),
+              width: 82,
+              height: 36,
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(7),
                 child: Image.asset('assets/images/app_logo.png', fit: BoxFit.contain),
               ),
             ),

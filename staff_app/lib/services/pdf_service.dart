@@ -102,12 +102,12 @@ class PdfService {
                             children: [
                               if (logoImg != null) ...[
                                 pw.Container(
-                                  width: 28,
-                                  height: 28,
-                                  padding: const pw.EdgeInsets.all(2),
+                                  width: 60,
+                                  height: 24,
+                                  padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                                   decoration: pw.BoxDecoration(
                                     color: PdfColors.white,
-                                    borderRadius: pw.BorderRadius.circular(6),
+                                    borderRadius: pw.BorderRadius.circular(5),
                                   ),
                                   child: pw.Image(logoImg, fit: pw.BoxFit.contain),
                                 ),
@@ -144,9 +144,9 @@ class PdfService {
                               children: [
                                 if (logoImg != null) ...[
                                   pw.Container(
-                                    width: 36,
-                                    height: 36,
-                                    padding: const pw.EdgeInsets.all(2),
+                                    width: 82,
+                                    height: 32,
+                                    padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 3),
                                     decoration: pw.BoxDecoration(
                                       color: PdfColors.white,
                                       borderRadius: pw.BorderRadius.circular(6),
@@ -370,12 +370,12 @@ class PdfService {
                         children: [
                           if (logoImg != null) ...[
                             pw.Container(
-                              width: isNarrow ? 26 : 34,
-                              height: isNarrow ? 26 : 34,
-                              padding: const pw.EdgeInsets.all(2),
+                              width: isNarrow ? 58 : 78,
+                              height: isNarrow ? 24 : 30,
+                              padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                               decoration: pw.BoxDecoration(
                                 color: PdfColors.white,
-                                borderRadius: pw.BorderRadius.circular(6),
+                                borderRadius: pw.BorderRadius.circular(5),
                               ),
                               child: pw.Image(logoImg, fit: pw.BoxFit.contain),
                             ),

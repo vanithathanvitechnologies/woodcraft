@@ -42,100 +42,126 @@ async function initDb() {
   const [[salesUser]] = await connection.query("SELECT id FROM users WHERE role = 'sales' LIMIT 1");
   const [[prodUser]] = await connection.query("SELECT id FROM users WHERE role = 'production' LIMIT 1");
 
-  // 2. Seed Design Catalog with generated PNG artwork if empty
+  // 2. Seed Design Catalog (uses Suresh Timbers catalog manifest if available)
   const [[catalogCount]] = await connection.query('SELECT COUNT(*) AS cnt FROM design_catalog');
   if (catalogCount.cnt === 0) {
     const catalogDir = path.join(__dirname, '..', 'uploads', 'catalog');
-    const samples = [
-      {
-        title: 'Royal Chettinad Lotus Main Door',
-        category: 'Main Door & Frame',
-        carving_style: 'Chettinad Floral & Pillar',
-        wood_species: 'Burma Teak',
-        base_price: 42000,
-        polish: 'Natural Teak Matte',
-        leaf: 'Double Leaf',
-        tags: 'main door,chettinad,double leaf,luxury',
-        trending: 1,
-      },
-      {
-        title: 'Temple Bells Pooja Door',
-        category: 'Pooja Door',
-        carving_style: 'Traditional Temple Brass Bells',
-        wood_species: 'Nilambur Teak',
-        base_price: 34000,
-        polish: 'Honey Gold Gloss',
-        leaf: 'Double Leaf',
-        tags: 'pooja,temple,bells,teak',
-        trending: 1,
-      },
-      {
-        title: 'Modern Heritage Panel Main Door',
-        category: 'Main Door & Frame',
-        carving_style: 'Minimalist Carved Medallion',
-        wood_species: 'Ghana Teak',
-        base_price: 29500,
-        polish: 'Dark Walnut Satin',
-        leaf: 'Single Leaf',
-        tags: 'modern,single leaf,walnut',
-        trending: 1,
-      },
-      {
-        title: 'Rosewood Peacock Grand Frame',
-        category: 'Main Door & Frame',
-        carving_style: 'Peacock Arch Carving',
-        wood_species: 'Indian Rosewood',
-        base_price: 54000,
-        polish: 'Royal Rosewood Gloss',
-        leaf: 'Double Leaf',
-        tags: 'rosewood,peacock,grand,luxury',
-        trending: 0,
-      },
-      {
-        title: 'Classic Teak Arch Window',
-        category: 'Window',
-        carving_style: 'Beaded Border Frame',
-        wood_species: 'Burma Teak',
-        base_price: 18500,
-        polish: 'Natural PU Clear',
-        leaf: 'Double Leaf',
-        tags: 'window,teak,ventilation',
-        trending: 0,
-      },
-    ];
+    const stManifestPath = path.join(catalogDir, 'suresh_timbers_catalog.json');
+    if (fs.existsSync(stManifestPath)) {
+      const stData = JSON.parse(fs.readFileSync(stManifestPath, 'utf8'));
+      const stItems = Array.isArray(stData.items) ? stData.items : [];
+      for (const item of stItems) {
+        await connection.query(
+          `INSERT INTO design_catalog
+            (title, category, carving_style, wood_species, base_price, image_url, additional_images, tags, description, is_trending, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?)`,
+          [
+            item.title,
+            item.category || 'Main Door & Frame',
+            item.carving_style || '',
+            item.wood_species || 'Burma Teak',
+            Number(item.base_price) || 35000,
+            item.image_url,
+            item.tags || 'suresh timbers',
+            item.description || '',
+            item.is_trending ? 1 : 0,
+            salesUser ? salesUser.id : null,
+          ]
+        );
+      }
+      console.log(`Seeded ${stItems.length} Suresh Timbers catalog designs.`);
+    } else {
+      const samples = [
+        {
+          title: 'Royal Chettinad Lotus Main Door',
+          category: 'Main Door & Frame',
+          carving_style: 'Chettinad Floral & Pillar',
+          wood_species: 'Burma Teak',
+          base_price: 42000,
+          polish: 'Natural Teak Matte',
+          leaf: 'Double Leaf',
+          tags: 'main door,chettinad,double leaf,luxury',
+          trending: 1,
+        },
+        {
+          title: 'Temple Bells Pooja Door',
+          category: 'Pooja Door',
+          carving_style: 'Traditional Temple Brass Bells',
+          wood_species: 'Nilambur Teak',
+          base_price: 34000,
+          polish: 'Honey Gold Gloss',
+          leaf: 'Double Leaf',
+          tags: 'pooja,temple,bells,teak',
+          trending: 1,
+        },
+        {
+          title: 'Modern Heritage Panel Main Door',
+          category: 'Main Door & Frame',
+          carving_style: 'Minimalist Carved Medallion',
+          wood_species: 'Ghana Teak',
+          base_price: 29500,
+          polish: 'Dark Walnut Satin',
+          leaf: 'Single Leaf',
+          tags: 'modern,single leaf,walnut',
+          trending: 1,
+        },
+        {
+          title: 'Rosewood Peacock Grand Frame',
+          category: 'Main Door & Frame',
+          carving_style: 'Peacock Arch Carving',
+          wood_species: 'Indian Rosewood',
+          base_price: 54000,
+          polish: 'Royal Rosewood Gloss',
+          leaf: 'Double Leaf',
+          tags: 'rosewood,peacock,grand,luxury',
+          trending: 0,
+        },
+        {
+          title: 'Classic Teak Arch Window',
+          category: 'Window',
+          carving_style: 'Beaded Border Frame',
+          wood_species: 'Burma Teak',
+          base_price: 18500,
+          polish: 'Natural PU Clear',
+          leaf: 'Double Leaf',
+          tags: 'window,teak,ventilation',
+          trending: 0,
+        },
+      ];
 
-    for (let i = 0; i < samples.length; i++) {
-      const s = samples[i];
-      const rendered = renderDoorPng({
-        woodSpecies: s.wood_species,
-        polishShade: s.polish,
-        leafType: s.leaf,
-        carvingPattern: s.carving_style,
-        category: s.category,
-        seed: i + 10,
-        outputDir: catalogDir,
-        filePrefix: `catalog-${i + 1}`,
-      });
+      for (let i = 0; i < samples.length; i++) {
+        const s = samples[i];
+        const rendered = renderDoorPng({
+          woodSpecies: s.wood_species,
+          polishShade: s.polish,
+          leafType: s.leaf,
+          carvingPattern: s.carving_style,
+          category: s.category,
+          seed: i + 10,
+          outputDir: catalogDir,
+          filePrefix: `catalog-${i + 1}`,
+        });
 
-      await connection.query(
-        `INSERT INTO design_catalog
-          (title, category, carving_style, wood_species, base_price, image_url, tags, description, is_trending, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          s.title,
-          s.category,
-          s.carving_style,
-          s.wood_species,
-          s.base_price,
-          `/uploads/catalog/${rendered.filename}`,
-          s.tags,
-          `Handcrafted ${s.title} in seasoned ${s.wood_species}.`,
-          s.trending,
-          salesUser ? salesUser.id : null,
-        ]
-      );
+        await connection.query(
+          `INSERT INTO design_catalog
+            (title, category, carving_style, wood_species, base_price, image_url, tags, description, is_trending, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            s.title,
+            s.category,
+            s.carving_style,
+            s.wood_species,
+            s.base_price,
+            `/uploads/catalog/${rendered.filename}`,
+            s.tags,
+            `Handcrafted ${s.title} in seasoned ${s.wood_species}.`,
+            s.trending,
+            salesUser ? salesUser.id : null,
+          ]
+        );
+      }
+      console.log('Seeded 5 sample designs with PNG artwork.');
     }
-    console.log('Seeded 5 sample designs with PNG artwork.');
   }
 
   // 3. Seed Initial Customer & Orders if empty

@@ -50,36 +50,62 @@ try {
     $salesId = $pdo->query("SELECT id FROM users WHERE role = 'sales' LIMIT 1")->fetchColumn() ?: null;
     $prodId = $pdo->query("SELECT id FROM users WHERE role = 'production' LIMIT 1")->fetchColumn() ?: null;
 
-    // 3. Seed Design Catalog
+    // 3. Seed Design Catalog (uses Suresh Timbers catalog manifest if available)
     $catCount = (int)$pdo->query('SELECT COUNT(*) FROM design_catalog')->fetchColumn();
     if ($catCount === 0) {
-        $samples = [
-            ['Royal Chettinad Lotus Main Door', 'Main Door & Frame', 'Chettinad Floral & Pillar', 'Burma Teak', 42000, 'Natural Teak Matte', 'Double Leaf', 'main door,chettinad,double leaf', 1],
-            ['Temple Bells Pooja Door', 'Pooja Door', 'Traditional Temple Brass Bells', 'Nilambur Teak', 34000, 'Honey Gold Gloss', 'Double Leaf', 'pooja,temple,bells', 1],
-            ['Modern Heritage Panel Main Door', 'Main Door & Frame', 'Minimalist Carved Medallion', 'Ghana Teak', 29500, 'Dark Walnut Satin', 'Single Leaf', 'modern,single leaf,walnut', 1],
-            ['Rosewood Peacock Grand Frame', 'Main Door & Frame', 'Peacock Arch Carving', 'Indian Rosewood', 54000, 'Royal Rosewood Gloss', 'Double Leaf', 'rosewood,peacock,luxury', 0],
-            ['Classic Teak Arch Window', 'Window', 'Beaded Border Frame', 'Burma Teak', 18500, 'Natural PU Clear', 'Double Leaf', 'window,teak', 0],
-        ];
-        $cStmt = $pdo->prepare(
-            'INSERT INTO design_catalog (title, category, carving_style, wood_species, base_price, image_url, tags, description, is_trending, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        );
-        foreach ($samples as $idx => $s) {
-            $img = renderDoorPngPhp([
-                'wood_species' => $s[3],
-                'polish_shade' => $s[5],
-                'leaf_type' => $s[6],
-                'woodwork_category' => $s[1],
-                'output_dir' => __DIR__ . '/uploads/catalog',
-                'prefix' => 'catalog-' . ($idx + 1),
-            ]);
-            $cStmt->execute([
-                $s[0], $s[1], $s[2], $s[3], $s[4],
-                '/uploads/catalog/' . $img['filename'],
-                $s[7], "Handcrafted {$s[0]} in seasoned {$s[3]}.", $s[8], $salesId,
-            ]);
+        $stManifestPath = __DIR__ . '/uploads/catalog/suresh_timbers_catalog.json';
+        if (is_file($stManifestPath)) {
+            $stData = json_decode(file_get_contents($stManifestPath), true);
+            $stItems = $stData['items'] ?? [];
+            $cStmt = $pdo->prepare(
+                'INSERT INTO design_catalog (title, category, carving_style, wood_species, base_price, image_url, additional_images, tags, description, is_trending, created_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            foreach ($stItems as $item) {
+                $cStmt->execute([
+                    (string)$item['title'],
+                    (string)($item['category'] ?? 'Main Door & Frame'),
+                    (string)($item['carving_style'] ?? ''),
+                    (string)($item['wood_species'] ?? 'Burma Teak'),
+                    (float)($item['base_price'] ?? 35000),
+                    (string)$item['image_url'],
+                    '[]',
+                    (string)($item['tags'] ?? 'suresh timbers'),
+                    (string)($item['description'] ?? ''),
+                    !empty($item['is_trending']) ? 1 : 0,
+                    $salesId,
+                ]);
+            }
+            echo "Seeded " . count($stItems) . " Suresh Timbers catalog designs.\n";
+        } else {
+            $samples = [
+                ['Royal Chettinad Lotus Main Door', 'Main Door & Frame', 'Chettinad Floral & Pillar', 'Burma Teak', 42000, 'Natural Teak Matte', 'Double Leaf', 'main door,chettinad,double leaf', 1],
+                ['Temple Bells Pooja Door', 'Pooja Door', 'Traditional Temple Brass Bells', 'Nilambur Teak', 34000, 'Honey Gold Gloss', 'Double Leaf', 'pooja,temple,bells', 1],
+                ['Modern Heritage Panel Main Door', 'Main Door & Frame', 'Minimalist Carved Medallion', 'Ghana Teak', 29500, 'Dark Walnut Satin', 'Single Leaf', 'modern,single leaf,walnut', 1],
+                ['Rosewood Peacock Grand Frame', 'Main Door & Frame', 'Peacock Arch Carving', 'Indian Rosewood', 54000, 'Royal Rosewood Gloss', 'Double Leaf', 'rosewood,peacock,luxury', 0],
+                ['Classic Teak Arch Window', 'Window', 'Beaded Border Frame', 'Burma Teak', 18500, 'Natural PU Clear', 'Double Leaf', 'window,teak', 0],
+            ];
+            $cStmt = $pdo->prepare(
+                'INSERT INTO design_catalog (title, category, carving_style, wood_species, base_price, image_url, tags, description, is_trending, created_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            foreach ($samples as $idx => $s) {
+                $img = renderDoorPngPhp([
+                    'wood_species' => $s[3],
+                    'polish_shade' => $s[5],
+                    'leaf_type' => $s[6],
+                    'woodwork_category' => $s[1],
+                    'output_dir' => __DIR__ . '/uploads/catalog',
+                    'prefix' => 'catalog-' . ($idx + 1),
+                ]);
+                $cStmt->execute([
+                    $s[0], $s[1], $s[2], $s[3], $s[4],
+                    '/uploads/catalog/' . $img['filename'],
+                    $s[7], "Handcrafted {$s[0]} in seasoned {$s[3]}.", $s[8], $salesId,
+                ]);
+            }
+            echo "Seeded 5 catalog designs with PNG artwork.\n";
         }
-        echo "Seeded 5 catalog designs with PNG artwork.\n";
     }
 
     // 4. Seed Initial Customer & Orders
