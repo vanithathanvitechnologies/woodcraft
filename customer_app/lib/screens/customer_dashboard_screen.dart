@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/customer_api_service.dart';
+import '../widgets/suresh_timbers_showcase.dart';
 import 'mobile_login_screen.dart';
 import 'order_track_screen.dart';
 
@@ -107,12 +108,16 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('My Door Orders',
+                  const Text('Suresh Timbers',
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800)),
-                  Text('${customer['mobile'] ?? ''}',
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 11.5, color: Colors.white70)),
+                  Text(
+                    (customer['mobile'] ?? '').toString().isNotEmpty
+                        ? 'Since 1983 • ${customer['mobile']}'
+                        : 'Since 1983 • 25-Yr Written Warranty',
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11.5, color: Colors.white70),
+                  ),
                 ],
               ),
             ),
@@ -123,146 +128,158 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
           IconButton(tooltip: 'Logout', onPressed: _logout, icon: const Icon(Icons.logout_rounded)),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.cloud_off_rounded, size: 48, color: _danger),
-                      const SizedBox(height: 10),
-                      Text(_error!, style: const TextStyle(color: _danger)),
-                      const SizedBox(height: 12),
-                      ElevatedButton.icon(
-                        onPressed: _load,
-                        icon: const Icon(Icons.refresh_rounded),
-                        label: const Text('Retry'),
-                      ),
-                    ],
+      body: RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            // 1. Suresh Timbers Royal Promotional Hero Banner
+            const SureshTimbersPromoHero(),
+            const SizedBox(height: 16),
+
+            // 2. Customer Welcome & Order Summary Banner
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [_woodDark, _woodPrimary, Color(0xFF8C5327)],
+                ),
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: _woodDark.withValues(alpha: 0.18),
+                    blurRadius: 14,
+                    offset: const Offset(0, 6),
                   ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: ListView(
-                    padding: const EdgeInsets.all(16),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
                     children: [
-                      // Luxury Hero Banner
-                      Container(
-                        padding: const EdgeInsets.all(18),
-                        decoration: BoxDecoration(
-                          gradient: const LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [_woodDark, _woodPrimary, Color(0xFF8C5327)],
-                          ),
-                          borderRadius: BorderRadius.circular(22),
-                          boxShadow: [
-                            BoxShadow(
-                              color: _woodDark.withValues(alpha: 0.22),
-                              blurRadius: 18,
-                              offset: const Offset(0, 8),
-                            ),
-                          ],
-                        ),
+                      CircleAvatar(
+                        radius: 20,
+                        backgroundColor: _brass.withValues(alpha: 0.22),
+                        child: const Icon(Icons.person_rounded, color: _brass, size: 22),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Row(
-                              children: [
-                                CircleAvatar(
-                                  radius: 22,
-                                  backgroundColor: _brass.withValues(alpha: 0.22),
-                                  child: const Icon(Icons.person_rounded, color: _brass, size: 24),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Welcome, ${customer['name'] ?? 'Customer'}',
-                                        style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800),
-                                      ),
-                                      if ((customer['delivery_address'] ?? '').toString().isNotEmpty)
-                                        Row(
-                                          children: [
-                                            const Icon(Icons.location_on_rounded, size: 13, color: _brass),
-                                            const SizedBox(width: 4),
-                                            Expanded(
-                                              child: Text(
-                                                '${customer['delivery_address']}',
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: const TextStyle(color: Colors.white70, fontSize: 12),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                    ],
+                            Text(
+                              'Welcome, ${customer['name'] ?? 'Valued Customer'}',
+                              style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w800),
+                            ),
+                            if ((customer['delivery_address'] ?? '').toString().isNotEmpty)
+                              Row(
+                                children: [
+                                  const Icon(Icons.location_on_rounded, size: 13, color: _brass),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(
+                                      '${customer['delivery_address']}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 16),
-                            Row(
-                              children: [
-                                _heroStat(Icons.inventory_2_rounded, 'Orders', '${summary['total_orders'] ?? 0}'),
-                                const SizedBox(width: 8),
-                                _heroStat(Icons.handyman_rounded, 'In Craft', '${summary['in_progress'] ?? 0}'),
-                                const SizedBox(width: 8),
-                                _heroStat(Icons.verified_rounded, 'Ready', '${summary['completed'] ?? 0}'),
-                                const SizedBox(width: 8),
-                                _heroStat(
-                                  Icons.account_balance_wallet_rounded,
-                                  'Balance',
-                                  _inr.format(double.tryParse('${summary['total_balance']}') ?? 0),
-                                ),
-                              ],
-                            ),
+                                ],
+                              ),
                           ],
                         ),
                       ),
-                      const SizedBox(height: 20),
-
-                      // Section Title
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(7),
-                            decoration: BoxDecoration(
-                              color: _woodPrimary.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: const Icon(Icons.local_shipping_rounded, size: 18, color: _woodPrimary),
-                          ),
-                          const SizedBox(width: 10),
-                          const Text(
-                            'Live Order Tracking',
-                            style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800, color: _woodDark),
-                          ),
-                        ],
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      _heroStat(Icons.inventory_2_rounded, 'Orders', '${summary['total_orders'] ?? 0}'),
+                      const SizedBox(width: 8),
+                      _heroStat(Icons.handyman_rounded, 'In Craft', '${summary['in_progress'] ?? 0}'),
+                      const SizedBox(width: 8),
+                      _heroStat(Icons.verified_rounded, 'Ready', '${summary['completed'] ?? 0}'),
+                      const SizedBox(width: 8),
+                      _heroStat(
+                        Icons.account_balance_wallet_rounded,
+                        'Balance',
+                        _inr.format(double.tryParse('${summary['total_balance']}') ?? 0),
                       ),
-                      const SizedBox(height: 12),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 22),
 
-                      if (orders.isEmpty)
-                        Container(
-                          padding: const EdgeInsets.all(28),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(18),
-                            border: Border.all(color: _border),
-                          ),
-                          child: const Column(
-                            children: [
-                              Icon(Icons.door_front_door_outlined, size: 48, color: Colors.black26),
-                              SizedBox(height: 10),
-                              Text('No orders found for your mobile number yet.'),
-                            ],
-                          ),
-                        )
-                      else
-                        ...orders.map((raw) {
+            // 3. Live Order Tracking Section
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(7),
+                  decoration: BoxDecoration(
+                    color: _woodPrimary.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.local_shipping_rounded, size: 18, color: _woodPrimary),
+                ),
+                const SizedBox(width: 10),
+                const Text(
+                  'Live Order Tracking',
+                  style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800, color: _woodDark),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 28),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_error != null)
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: _border),
+                ),
+                child: Column(
+                  children: [
+                    const Icon(Icons.cloud_off_rounded, size: 40, color: _danger),
+                    const SizedBox(height: 8),
+                    Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: _danger, fontSize: 13)),
+                    const SizedBox(height: 10),
+                    ElevatedButton.icon(
+                      onPressed: _load,
+                      icon: const Icon(Icons.refresh_rounded, size: 18),
+                      label: const Text('Retry Orders'),
+                    ),
+                  ],
+                ),
+              )
+            else if (orders.isEmpty)
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: _border),
+                ),
+                child: const Column(
+                  children: [
+                    Icon(Icons.door_front_door_outlined, size: 42, color: Colors.black26),
+                    SizedBox(height: 8),
+                    Text('No orders found for your mobile number yet.'),
+                  ],
+                ),
+              )
+            else
+              ...orders.map((raw) {
                           final o = Map<String, dynamic>.from(raw as Map);
                           final stage = int.tryParse('${o['current_stage']}') ?? 1;
                           final isDone = stage == 8;
@@ -442,9 +459,14 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                             ),
                           );
                         }),
-                    ],
-                  ),
-                ),
+
+            const SizedBox(height: 22),
+
+            // 4. Complete Suresh Timbers Achievements, Certifications, Showcase, Clients & Contact
+            const SureshTimbersShowcaseSection(),
+          ],
+        ),
+      ),
     );
   }
 

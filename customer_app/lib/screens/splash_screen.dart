@@ -311,12 +311,12 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                   child: Column(
                     children: [
                       const Text(
-                        'WoodCraft',
+                        'Suresh Timbers',
                         style: TextStyle(
-                          fontSize: 32,
+                          fontSize: 30,
                           fontWeight: FontWeight.w900,
                           color: Colors.white,
-                          letterSpacing: 0.8,
+                          letterSpacing: 0.6,
                         ),
                       ),
                       const SizedBox(height: 6),
@@ -330,22 +330,22 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                           ),
                         ),
                         child: const Text(
-                          'CUSTOMISER',
+                          'SINCE 1983 • 25 YRS WRITTEN WARRANTY',
                           style: TextStyle(
-                            fontSize: 11.5,
+                            fontSize: 10.5,
                             fontWeight: FontWeight.w700,
                             color: Color(0xFFF3DEC0),
-                            letterSpacing: 1.6,
+                            letterSpacing: 1.1,
                           ),
                         ),
                       ),
                       const SizedBox(height: 10),
                       Text(
-                        'Your Dream Door, Our Craft',
+                        'Royal Main Entrance for Your Family',
                         style: TextStyle(
                           fontSize: 13,
-                          color: Colors.white.withValues(alpha: 0.68),
-                          letterSpacing: 0.5,
+                          color: Colors.white.withValues(alpha: 0.72),
+                          letterSpacing: 0.4,
                         ),
                       ),
                     ],

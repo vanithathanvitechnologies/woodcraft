@@ -12,7 +12,6 @@ class MobileLoginScreen extends StatefulWidget {
 class _MobileLoginScreenState extends State<MobileLoginScreen> {
   static const _woodDark = Color(0xFF3B1E0D);
   static const _woodPrimary = Color(0xFF5C2E14);
-  static const _brass = Color(0xFFD4A037);
   static const _bg = Color(0xFFFAF5EE);
 
   final _mobileCtrl = TextEditingController(text: '76039 70435');
@@ -173,18 +172,18 @@ class _MobileLoginScreenState extends State<MobileLoginScreen> {
                 const SizedBox(height: 52),
 
                 const Text(
-                  'WoodCraft',
+                  'Suresh Timbers',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: _woodDark),
                 ),
                 const Text(
-                  'Customiser',
+                  'Since 1983 • 25 Years Written Warranty',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF7A5A43)),
+                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: Color(0xFF7A5A43)),
                 ),
                 const SizedBox(height: 4),
                 const Text(
-                  'Your Dream Door, Our Craft',
+                  'Royal Main Entrance for Your Family',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 12.5, color: Color(0xFF9C816B)),
                 ),
