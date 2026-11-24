@@ -222,7 +222,7 @@ function handleOrdersRoutes(string $method, array $segments): void {
                 $jobId,
                 $customerId,
                 $authUser['id'],
-                $body['woodwork_category'] ?? 'Main Door & Frame',
+                $body['woodwork_category'] ?? 'Door',
                 (float)($body['width_inches'] ?? 36),
                 (float)($body['height_inches'] ?? 84),
                 $body['frame_section'] ?? '5 x 3 inch',

@@ -78,7 +78,7 @@ function renderDoorPng({
   polishShade = 'Natural Teak Matte',
   leafType = 'Single Leaf',
   carvingPattern = 'Royal Lotus & Pillar',
-  category = 'Main Door & Frame',
+  category = 'Door',
   seed = 1,
   outputDir,
   filePrefix = 'ai-door',

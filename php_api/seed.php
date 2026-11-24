@@ -64,7 +64,7 @@ try {
             foreach ($stItems as $item) {
                 $cStmt->execute([
                     (string)$item['title'],
-                    (string)($item['category'] ?? 'Main Door & Frame'),
+                    (string)($item['category'] ?? 'Door'),
                     (string)($item['carving_style'] ?? ''),
                     (string)($item['wood_species'] ?? 'Burma Teak'),
                     (float)($item['base_price'] ?? 35000),
@@ -79,11 +79,11 @@ try {
             echo "Seeded " . count($stItems) . " Suresh Timbers catalog designs.\n";
         } else {
             $samples = [
-                ['Royal Chettinad Lotus Main Door', 'Main Door & Frame', 'Chettinad Floral & Pillar', 'Burma Teak', 42000, 'Natural Teak Matte', 'Double Leaf', 'main door,chettinad,double leaf', 1],
-                ['Temple Bells Pooja Door', 'Pooja Door', 'Traditional Temple Brass Bells', 'Nilambur Teak', 34000, 'Honey Gold Gloss', 'Double Leaf', 'pooja,temple,bells', 1],
-                ['Modern Heritage Panel Main Door', 'Main Door & Frame', 'Minimalist Carved Medallion', 'Ghana Teak', 29500, 'Dark Walnut Satin', 'Single Leaf', 'modern,single leaf,walnut', 1],
-                ['Rosewood Peacock Grand Frame', 'Main Door & Frame', 'Peacock Arch Carving', 'Indian Rosewood', 54000, 'Royal Rosewood Gloss', 'Double Leaf', 'rosewood,peacock,luxury', 0],
-                ['Classic Teak Arch Window', 'Window', 'Beaded Border Frame', 'Burma Teak', 18500, 'Natural PU Clear', 'Double Leaf', 'window,teak', 0],
+                ['Royal Heritage Handcrafted Teak Wood Main Entrance Door', 'Door', 'Raja Nilai Pillars & Temple Crown', 'Burma Teak', 75000, 'Natural Teak Matte', 'Double Leaf', 'door,teak,royal', 1],
+                ['Traditional South Indian Teak Wood Main Door', 'Door', 'South Indian Pillar & Double Shutter', 'Nilambur Teak', 68000, 'Honey Gold Gloss', 'Double Leaf', 'door,south indian,teak', 1],
+                ['Classic Premium Teak Wood Single Door', 'Door', 'Minimalist Brass Peacock Panel', 'Ghana Teak', 38000, 'Dark Walnut Satin', 'Single Leaf', 'door,single leaf,classic', 1],
+                ['Premium Carved Teak Wood Frame (Nilai)', 'Wood Frames', 'Hand-Carved Teak Nilai Frame', 'Burma Teak', 42000, 'Natural Teak Matte', 'Single Leaf', 'wood frames,nilai,teak', 1],
+                ['A-Grade Seasoned Burma Teak Hardwood', 'Hard Wood', 'Seasoned Burma Teak Timber', 'Burma Teak', 28000, 'Natural PU Clear', 'Single Leaf', 'hard wood,burma teak,timber', 0],
             ];
             $cStmt = $pdo->prepare(
                 'INSERT INTO design_catalog (title, category, carving_style, wood_species, base_price, image_url, tags, description, is_trending, created_by)
@@ -120,12 +120,12 @@ try {
 
         $ai1 = renderDoorPngPhp([
             'wood_species' => 'Burma Teak', 'polish_shade' => 'Natural Teak Matte',
-            'leaf_type' => 'Double Leaf', 'woodwork_category' => 'Main Door & Frame',
+            'leaf_type' => 'Double Leaf', 'woodwork_category' => 'Door',
             'output_dir' => __DIR__ . '/uploads/ai-outputs', 'prefix' => 'seed-order-1',
         ]);
         $ai2 = renderDoorPngPhp([
             'wood_species' => 'Nilambur Teak', 'polish_shade' => 'Honey Gold Gloss',
-            'leaf_type' => 'Double Leaf', 'woodwork_category' => 'Pooja Door',
+            'leaf_type' => 'Double Leaf', 'woodwork_category' => 'Door',
             'output_dir' => __DIR__ . '/uploads/ai-outputs', 'prefix' => 'seed-order-2',
         ]);
 
@@ -142,7 +142,7 @@ try {
 
         $oStmt->execute([
             'SUW-2026-0001', $c1, $salesId, $prodId,
-            'Main Door & Frame', 48, 84, '5 x 3.5 inch', '2 inch (50mm)',
+            'Door', 48, 84, '5 x 3.5 inch', '2 inch (50mm)',
             'Double Leaf', 'Burma Teak', 'Chettinad Lotus Center + Beaded Frame',
             'Natural Teak Matte', 'Antique Brass Lion Handles & Yale Mortise', 1,
             'Ensure deep 3D lotus carving in center panels',
@@ -161,7 +161,7 @@ try {
 
         $oStmt->execute([
             'SUW-2026-0002', $c2, $salesId, $prodId,
-            'Pooja Door', 36, 78, '4 x 3 inch', '1.5 inch (38mm)',
+            'Door', 36, 78, '4 x 3 inch', '1.5 inch (38mm)',
             'Double Leaf', 'Nilambur Teak', 'Traditional Temple Bells Grid',
             'Honey Gold Gloss', '24 Solid Brass Bells + Brass Aldrop', 1,
             'Include Om motif on top arch',

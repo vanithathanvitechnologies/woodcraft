@@ -210,7 +210,7 @@ router.post('/', authenticateToken, requireRoles('admin', 'owner', 'sales'), asy
       customer_name,
       customer_mobile,
       delivery_address = '',
-      woodwork_category = 'Main Door & Frame',
+      woodwork_category = 'Door',
       width_inches = 36,
       height_inches = 84,
       frame_section = '5 x 3 inch',

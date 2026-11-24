@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS customer_otps (
 CREATE TABLE IF NOT EXISTS design_catalog (
   id INT AUTO_INCREMENT PRIMARY KEY,
   title VARCHAR(180) NOT NULL,
-  category VARCHAR(80) NOT NULL DEFAULT 'Main Door & Frame',
+  category VARCHAR(80) NOT NULL DEFAULT 'Door',
   carving_style VARCHAR(100) NULL,
   wood_species VARCHAR(100) NOT NULL DEFAULT 'Burma Teak',
   base_price DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS orders (
   assigned_production_user_id INT NULL,
 
   -- Woodwork Technical Specifications (Visible to Production)
-  woodwork_category VARCHAR(80) NOT NULL DEFAULT 'Main Door & Frame',
+  woodwork_category VARCHAR(80) NOT NULL DEFAULT 'Door',
   width_inches DECIMAL(8, 2) NOT NULL DEFAULT 36.00,
   height_inches DECIMAL(8, 2) NOT NULL DEFAULT 84.00,
   frame_section VARCHAR(60) NOT NULL DEFAULT '5 x 3 inch',

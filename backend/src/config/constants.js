@@ -15,13 +15,9 @@ function getStageName(stageNumber) {
 }
 
 const WOODWORK_CATEGORIES = [
-  'Main Door & Frame',
-  'Pooja Door',
-  'Window',
-  'Wardrobe',
-  'Kitchen Cabinet',
-  'Cot',
-  'Custom Wooden Furniture',
+  'Door',
+  'Wood Frames',
+  'Hard Wood',
 ];
 
 const WOOD_SPECIES = [

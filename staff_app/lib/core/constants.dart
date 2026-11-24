@@ -11,13 +11,9 @@ class AppConstants {
   ];
 
   static const List<String> woodworkCategories = [
-    'Main Door & Frame',
-    'Pooja Door',
-    'Window',
-    'Wardrobe',
-    'Kitchen Cabinet',
-    'Cot',
-    'Custom Wooden Furniture',
+    'Door',
+    'Wood Frames',
+    'Hard Wood',
   ];
 
   static const List<String> woodSpecies = [

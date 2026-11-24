@@ -80,20 +80,14 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
 
   IconData _categoryIcon(String cat) {
     switch (cat) {
-      case 'Main Door & Frame':
+      case 'Door':
         return Icons.door_front_door_rounded;
-      case 'Pooja Door':
-        return Icons.temple_hindu_rounded;
-      case 'Window':
-        return Icons.window_rounded;
-      case 'Wardrobe':
-        return Icons.door_sliding_rounded;
-      case 'Kitchen Cabinet':
-        return Icons.kitchen_rounded;
-      case 'Cot':
-        return Icons.bed_rounded;
+      case 'Wood Frames':
+        return Icons.crop_portrait_rounded;
+      case 'Hard Wood':
+        return Icons.forest_rounded;
       default:
-        return Icons.chair_rounded;
+        return Icons.door_front_door_rounded;
     }
   }
 
@@ -107,45 +101,27 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
 
       // Apply sensible default dimensions & carving hint for the chosen woodwork category
       switch (newCategory) {
-        case 'Main Door & Frame':
+        case 'Door':
           _widthCtrl.text = '42';
           _heightCtrl.text = '84';
           _leafType = 'Double Leaf';
           _carvingCtrl.text = 'Royal Lotus & Pillar Carving';
           break;
-        case 'Pooja Door':
-          _widthCtrl.text = '36';
-          _heightCtrl.text = '78';
-          _leafType = 'Double Leaf';
-          _carvingCtrl.text = 'Traditional Temple Bells & Om Arch';
-          break;
-        case 'Window':
-          _widthCtrl.text = '48';
-          _heightCtrl.text = '48';
-          _leafType = 'Double Leaf';
-          _carvingCtrl.text = 'Beaded Border Arch Frame';
-          break;
-        case 'Wardrobe':
-          _widthCtrl.text = '72';
+        case 'Wood Frames':
+          _widthCtrl.text = '42';
           _heightCtrl.text = '84';
-          _leafType = 'Double Leaf';
-          _carvingCtrl.text = 'Minimalist Panel Grooves';
-          break;
-        case 'Kitchen Cabinet':
-          _widthCtrl.text = '96';
-          _heightCtrl.text = '30';
-          _leafType = 'Double Leaf';
-          _carvingCtrl.text = 'Clean Beveled Shutter Trim';
-          break;
-        case 'Cot':
-          _widthCtrl.text = '72';
-          _heightCtrl.text = '78';
           _leafType = 'Single Leaf';
-          _carvingCtrl.text = 'Carved Heritage Headboard';
+          _carvingCtrl.text = 'Hand-Carved Teak Nilai Frame';
+          break;
+        case 'Hard Wood':
+          _widthCtrl.text = '48';
+          _heightCtrl.text = '96';
+          _leafType = 'Single Leaf';
+          _carvingCtrl.text = 'Seasoned A-Grade Burma Teak';
           break;
         default:
-          _widthCtrl.text = '48';
-          _heightCtrl.text = '36';
+          _widthCtrl.text = '42';
+          _heightCtrl.text = '84';
           _leafType = 'Single Leaf';
           _carvingCtrl.text = 'Custom Handcrafted Carving';
           break;

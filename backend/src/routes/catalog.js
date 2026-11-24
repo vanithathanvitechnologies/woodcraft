@@ -53,7 +53,7 @@ router.post(
     try {
       const {
         title,
-        category = 'Main Door & Frame',
+        category = 'Door',
         carving_style = '',
         wood_species = 'Burma Teak',
         base_price = 25000,
@@ -160,7 +160,7 @@ router.post('/ai-combine', authenticateToken, requireRoles('admin', 'owner', 'sa
     const {
       reference_design_ids = [],
       reference_elements = [],
-      woodwork_category = 'Main Door & Frame',
+      woodwork_category = 'Door',
       width_inches = 36,
       height_inches = 84,
       frame_section = '5 x 3 inch',

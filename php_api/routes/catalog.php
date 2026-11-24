@@ -20,7 +20,7 @@ function handleCatalogRoutes(string $method, array $segments): void {
         $stmt->execute($refIds);
         $refDesigns = $stmt->fetchAll();
 
-        $category = (string)($body['woodwork_category'] ?? 'Main Door & Frame');
+        $category = (string)($body['woodwork_category'] ?? 'Door');
         $width = (float)($body['width_inches'] ?? 36);
         $height = (float)($body['height_inches'] ?? 84);
         $frameSection = (string)($body['frame_section'] ?? '5 x 3 inch');
@@ -167,7 +167,7 @@ function handleCatalogRoutes(string $method, array $segments): void {
         );
         $ins->execute([
             $title,
-            $data['category'] ?? 'Main Door & Frame',
+            $data['category'] ?? 'Door',
             $data['carving_style'] ?? '',
             $data['wood_species'] ?? 'Burma Teak',
             (float)($data['base_price'] ?? 25000),

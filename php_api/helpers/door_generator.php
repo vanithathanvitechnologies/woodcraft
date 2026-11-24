@@ -603,7 +603,7 @@ function renderDoorPngPhp(array $opts): array {
     $woodSpecies = $opts['wood_species'] ?? 'Burma Teak';
     $polishShade = $opts['polish_shade'] ?? 'Natural Teak Matte';
     $leafType = $opts['leaf_type'] ?? 'Single Leaf';
-    $category = $opts['woodwork_category'] ?? 'Main Door & Frame';
+    $category = $opts['woodwork_category'] ?? 'Door';
     $outputDir = $opts['output_dir'];
     $prefix = $opts['prefix'] ?? 'ai-combined';
     $uploadsRoot = rtrim((string)($opts['uploads_root'] ?? dirname(__DIR__)), '/\\');

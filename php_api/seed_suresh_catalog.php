@@ -46,10 +46,20 @@ try {
             (title, category, carving_style, wood_species, base_price, image_url, additional_images, tags, description, is_trending, is_archived, created_by)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)'
     );
-    $unarchiveStmt = $pdo->prepare('UPDATE design_catalog SET is_archived = 0 WHERE id = ?');
+    $updateStmt = $pdo->prepare(
+        'UPDATE design_catalog
+         SET title = ?, category = ?, carving_style = ?, wood_species = ?, base_price = ?, tags = ?, description = ?, is_trending = ?, is_archived = 0
+         WHERE id = ?'
+    );
+
+    // Archive any legacy designs belonging to removed categories
+    $archivedLegacy = $pdo->exec("UPDATE design_catalog SET is_archived = 1 WHERE category NOT IN ('Door', 'Wood Frames', 'Hard Wood') AND image_url NOT LIKE '/uploads/catalog/st-%'");
+    if ($archivedLegacy > 0) {
+        echo "Archived $archivedLegacy legacy items from removed categories.\n";
+    }
 
     $inserted = 0;
-    $existing = 0;
+    $updated = 0;
     $missingFiles = 0;
 
     foreach ($items as $item) {
@@ -61,25 +71,34 @@ try {
             $missingFiles++;
         }
 
+        $title = (string)$item['title'];
+        $category = (string)($item['category'] ?? 'Door');
+        $carving = (string)($item['carving_style'] ?? '');
+        $wood = (string)($item['wood_species'] ?? 'Burma Teak');
+        $price = (float)($item['base_price'] ?? 35000);
+        $tags = (string)($item['tags'] ?? 'suresh timbers');
+        $desc = (string)($item['description'] ?? '');
+        $trending = !empty($item['is_trending']) ? 1 : 0;
+
         $checkStmt->execute([$imgUrl]);
         $foundId = $checkStmt->fetchColumn();
         if ($foundId) {
-            $unarchiveStmt->execute([(int)$foundId]);
-            $existing++;
+            $updateStmt->execute([$title, $category, $carving, $wood, $price, $tags, $desc, $trending, (int)$foundId]);
+            $updated++;
             continue;
         }
 
         $insertStmt->execute([
-            (string)$item['title'],
-            (string)($item['category'] ?? 'Main Door & Frame'),
-            (string)($item['carving_style'] ?? ''),
-            (string)($item['wood_species'] ?? 'Burma Teak'),
-            (float)($item['base_price'] ?? 35000),
+            $title,
+            $category,
+            $carving,
+            $wood,
+            $price,
             $imgUrl,
             '[]',
-            (string)($item['tags'] ?? 'suresh timbers'),
-            (string)($item['description'] ?? ''),
-            !empty($item['is_trending']) ? 1 : 0,
+            $tags,
+            $desc,
+            $trending,
             $salesId,
         ]);
         $inserted++;
@@ -88,7 +107,7 @@ try {
     echo "Suresh Timbers Catalog Import Complete!\n";
     echo "  Manifest items : " . count($items) . "\n";
     echo "  Newly inserted : $inserted\n";
-    echo "  Already existed: $existing\n";
+    echo "  Updated existing: $updated\n";
     if ($missingFiles > 0) {
         echo "  WARNING: $missingFiles image files were not found on disk under uploads/catalog/.\n";
         echo "  Make sure you uploaded php_api/uploads/catalog/ (or extracted uploads_live_photos.zip).\n";
