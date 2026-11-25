@@ -187,11 +187,12 @@ class _ProductionHomeScreenState extends State<ProductionHomeScreen> with Single
                                     child: Container(
                                       width: 62,
                                       height: 88,
-                                      color: AppTheme.bg,
+                                      padding: const EdgeInsets.all(3),
+                                      color: Colors.white,
                                       child: (j['ai_output_image_url'] ?? '').toString().isNotEmpty
                                           ? Image.network(
                                               ApiService.instance.mediaUrl(j['ai_output_image_url'].toString()),
-                                              fit: BoxFit.cover,
+                                              fit: BoxFit.contain,
                                               errorBuilder: (_, __, ___) =>
                                                   const Icon(Icons.door_front_door_rounded, size: 32, color: AppTheme.woodPrimary),
                                             )

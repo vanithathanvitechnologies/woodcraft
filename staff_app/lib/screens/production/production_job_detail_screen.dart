@@ -321,12 +321,13 @@ class _ProductionJobDetailScreenState extends State<ProductionJobDetailScreen> {
                           borderRadius: BorderRadius.circular(14),
                           child: Container(
                             width: double.infinity,
-                            color: AppTheme.bg,
-                            padding: const EdgeInsets.all(8),
+                            color: Colors.white,
+                            padding: const EdgeInsets.all(10),
                             child: Image.network(
                               aiUrl,
-                              height: 260,
+                              height: 320,
                               fit: BoxFit.contain,
+                              filterQuality: FilterQuality.high,
                               errorBuilder: (_, __, ___) =>
                                   const SizedBox(height: 120, child: Icon(Icons.door_front_door_rounded, size: 54)),
                             ),
@@ -406,7 +407,13 @@ class _ProductionJobDetailScreenState extends State<ProductionJobDetailScreen> {
                               children: [
                                 ClipRRect(
                                   borderRadius: BorderRadius.circular(10),
-                                  child: Image.network(rUrl, width: 88, height: 105, fit: BoxFit.cover),
+                                  child: Container(
+                                    width: 88,
+                                    height: 105,
+                                    padding: const EdgeInsets.all(3),
+                                    color: Colors.white,
+                                    child: Image.network(rUrl, fit: BoxFit.contain),
+                                  ),
                                 ),
                                 const SizedBox(height: 4),
                                 SizedBox(

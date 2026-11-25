@@ -319,11 +319,12 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                                           child: Container(
                                             width: 72,
                                             height: 102,
-                                            color: _bg,
+                                            padding: const EdgeInsets.all(3),
+                                            color: Colors.white,
                                             child: (o['ai_output_image_url'] ?? '').toString().isNotEmpty
                                                 ? Image.network(
                                                     CustomerApiService.instance.mediaUrl(o['ai_output_image_url'].toString()),
-                                                    fit: BoxFit.cover,
+                                                    fit: BoxFit.contain,
                                                     errorBuilder: (_, __, ___) =>
                                                         const Icon(Icons.door_front_door_rounded, size: 36, color: _woodPrimary),
                                                   )

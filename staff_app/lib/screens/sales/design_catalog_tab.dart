@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../core/app_theme.dart';
 import '../../core/constants.dart';
 import '../../services/api_service.dart';
+import '../../widgets/ui_kit.dart';
 
 class DesignCatalogTab extends StatefulWidget {
   const DesignCatalogTab({super.key});
@@ -176,16 +177,6 @@ class _DesignCatalogTabState extends State<DesignCatalogTab> {
     );
   }
 
-  Future<void> _toggleTrending(Map<String, dynamic> d) async {
-    await ApiService.instance.put('/catalog/${d['id']}', {'is_trending': d['is_trending'] != 1});
-    _load();
-  }
-
-  Future<void> _archiveDesign(Map<String, dynamic> d) async {
-    await ApiService.instance.delete('/catalog/${d['id']}');
-    _load();
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -269,95 +260,99 @@ class _DesignCatalogTabState extends State<DesignCatalogTab> {
                           padding: const EdgeInsets.fromLTRB(14, 10, 14, 80),
                           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                             crossAxisCount: cols,
-                            mainAxisExtent: 265,
+                            mainAxisExtent: 285,
                             crossAxisSpacing: 12,
                             mainAxisSpacing: 12,
                           ),
-                      itemCount: visible.length,
-                      itemBuilder: (_, i) {
-                        final d = Map<String, dynamic>.from(visible[i] as Map);
-                        final isTrending = d['is_trending'] == 1;
-                        return Card(
-                          clipBehavior: Clip.antiAlias,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: Stack(
-                                  fit: StackFit.expand,
-                                  children: [
-                                    Image.network(
-                                      ApiService.instance.mediaUrl(d['image_url']?.toString()),
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (_, __, ___) => Container(
-                                        color: Colors.brown.shade50,
-                                        child: const Icon(Icons.door_front_door, size: 48, color: AppTheme.woodPrimary),
-                                      ),
-                                    ),
-                                    if (isTrending)
-                                      Positioned(
-                                        top: 8,
-                                        left: 8,
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                          decoration: BoxDecoration(
-                                            color: AppTheme.brass,
-                                            borderRadius: BorderRadius.circular(12),
-                                          ),
-                                          child: const Text('TRENDING',
-                                              style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: Colors.white)),
+                          itemCount: visible.length,
+                          itemBuilder: (_, i) {
+                            final d = Map<String, dynamic>.from(visible[i] as Map);
+                            final isTrending = d['is_trending'] == 1;
+                            final imgUrl = ApiService.instance.mediaUrl(d['image_url']?.toString());
+                            final priceText = _inr.format(double.tryParse('${d['base_price']}') ?? 0);
+                            return Card(
+                              clipBehavior: Clip.antiAlias,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: MouseRegion(
+                                      cursor: SystemMouseCursors.click,
+                                      child: GestureDetector(
+                                        onTap: () => UiKit.showFullImagePopup(
+                                          context,
+                                          imageUrl: imgUrl,
+                                          title: '${d['title'] ?? ''}',
+                                          subtitle: '${d['wood_species'] ?? ''} • ${d['category'] ?? ''}',
+                                          priceText: priceText,
+                                          badge: isTrending ? 'TRENDING' : null,
                                         ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.all(10),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text('${d['title']}',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-                                    Text('${d['wood_species']} • ${d['category']}',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(fontSize: 11, color: Colors.black54)),
-                                    const SizedBox(height: 4),
-                                    Row(
-                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        Text(_inr.format(double.tryParse('${d['base_price']}') ?? 0),
-                                            style: const TextStyle(
-                                                fontWeight: FontWeight.w800, color: AppTheme.woodPrimary)),
-                                        Row(
+                                        child: Stack(
+                                          fit: StackFit.expand,
                                           children: [
-                                            InkWell(
-                                              onTap: () => _toggleTrending(d),
-                                              child: Icon(
-                                                isTrending ? Icons.star : Icons.star_border,
-                                                size: 18,
-                                                color: AppTheme.brass,
+                                            Container(
+                                              color: Colors.white,
+                                              padding: const EdgeInsets.all(6),
+                                              child: Image.network(
+                                                imgUrl,
+                                                fit: BoxFit.contain,
+                                                filterQuality: FilterQuality.medium,
+                                                errorBuilder: (_, __, ___) => Container(
+                                                  color: Colors.brown.shade50,
+                                                  child: const Icon(Icons.door_front_door,
+                                                      size: 48, color: AppTheme.woodPrimary),
+                                                ),
                                               ),
                                             ),
-                                            const SizedBox(width: 6),
-                                            InkWell(
-                                              onTap: () => _archiveDesign(d),
-                                              child: const Icon(Icons.archive_outlined, size: 18, color: Colors.black45),
-                                            ),
+                                            if (isTrending)
+                                              Positioned(
+                                                top: 8,
+                                                left: 8,
+                                                child: Container(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                                  decoration: BoxDecoration(
+                                                    color: AppTheme.brass,
+                                                    borderRadius: BorderRadius.circular(12),
+                                                  ),
+                                                  child: const Text('TRENDING',
+                                                      style: TextStyle(
+                                                          fontSize: 9.5,
+                                                          fontWeight: FontWeight.w800,
+                                                          color: Colors.white)),
+                                                ),
+                                              ),
                                           ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.all(10),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text('${d['title']}',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                                        Text('${d['wood_species']} • ${d['category']}',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(fontSize: 11, color: Colors.black54)),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          priceText,
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.w800, color: AppTheme.woodPrimary),
                                         ),
                                       ],
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
+                            );
+                          },
                         );
-                      },
-                    );
                       },
                     ),
                   ),

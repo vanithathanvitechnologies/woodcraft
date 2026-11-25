@@ -18,9 +18,85 @@ function smoothstep(float $edge0, float $edge1, float $x): float {
 }
 
 /**
- * Loads a PNG/JPG/WEBP image into a GD GdImage/resource normalized to $w x $h.
+ * Computes Euclidean RGB color distance between a pixel and a reference color.
  */
-function loadNormalizedDoorImage(string $absPath, int $w = 600, int $h = 800) {
+function colorDist(int $r, int $g, int $b, array $ref): float {
+    $dr = $r - $ref[0];
+    $dg = $g - $ref[1];
+    $db = $b - $ref[2];
+    return sqrt($dr * $dr + $dg * $dg + $db * $db);
+}
+
+/**
+ * Checks whether a pixel is warm wood vs neutral white/cream backdrop.
+ */
+function isWoodPixel(int $r, int $g, int $b, ?array $wallRef = null): bool {
+    if ($wallRef !== null && colorDist($r, $g, $b, $wallRef) < 38.0) {
+        return false;
+    }
+    $max = max($r, $g, $b);
+    $min = min($r, $g, $b);
+    $sat = $max - $min;
+    $lum = 0.299 * $r + 0.587 * $g + 0.114 * $b;
+
+    if ($lum > 205 && $sat < 36) return false;
+    if ($g > $r + 8 && $sat > 14) return false;
+    return ($r >= $b - 6) && ($lum < 228);
+}
+
+/**
+ * Detects the background color of a catalog/showroom image using perimeter points
+ * while intentionally skipping the top-left corner (where catalog logos sit).
+ */
+function detectImageBackground($im): array {
+    $w = imagesx($im);
+    $h = imagesy($im);
+
+    $pts = [
+        [$w - 4, 4], [$w - 12, 4], [$w - 4, 14],
+        [$w - 4, (int)($h * 0.25)], [$w - 4, (int)($h * 0.50)], [$w - 4, (int)($h * 0.75)],
+        [4, $h - 5], [(int)($w * 0.50), $h - 5], [$w - 5, $h - 5],
+        [4, (int)($h * 0.50)], [4, (int)($h * 0.75)],
+    ];
+
+    $rs = []; $gs = []; $bs = [];
+    foreach ($pts as [$x, $y]) {
+        $cx = max(0, min($w - 1, $x));
+        $cy = max(0, min($h - 1, $y));
+        $rgb = imagecolorat($im, $cx, $cy);
+        $rs[] = ($rgb >> 16) & 255;
+        $gs[] = ($rgb >> 8) & 255;
+        $bs[] = $rgb & 255;
+    }
+    sort($rs); sort($gs); sort($bs);
+    $mid = (int)floor(count($rs) / 2);
+    $bg = [(float)$rs[$mid], (float)$gs[$mid], (float)$bs[$mid]];
+
+    $lum = 0.299 * $bg[0] + 0.587 * $bg[1] + 0.114 * $bg[2];
+    $sat = max($bg[0], $bg[1], $bg[2]) - min($bg[0], $bg[1], $bg[2]);
+
+    $matching = 0;
+    foreach ($pts as [$x, $y]) {
+        $cx = max(0, min($w - 1, $x));
+        $cy = max(0, min($h - 1, $y));
+        $rgb = imagecolorat($im, $cx, $cy);
+        if (colorDist(($rgb >> 16) & 255, ($rgb >> 8) & 255, $rgb & 255, $bg) < 36.0) {
+            $matching++;
+        }
+    }
+
+    // Uniform bright/neutral backdrop (catalog white or clean cream wall)
+    $hasCleanBg = ($lum >= 178.0 && $sat <= 48.0 && $matching >= 6);
+    return ['bg' => $bg, 'has_clean_bg' => $hasCleanBg];
+}
+
+/**
+ * Loads a source catalog image at full resolution WITHOUT ever cover-cropping it,
+ * isolates the complete wooden door/frame object (automatically removing detached
+ * top-left header logos like "SURESH TIMBERS"), and measures exact inner opening,
+ * crown, and pillar geometry.
+ */
+function extractDoorObject(string $absPath, array $meta = []): ?array {
     if (!is_file($absPath) || !function_exists('imagecreatefromstring')) {
         return null;
     }
@@ -31,192 +107,347 @@ function loadNormalizedDoorImage(string $absPath, int $w = 600, int $h = 800) {
 
     $sw = imagesx($src);
     $sh = imagesy($src);
-    if ($sw <= 0 || $sh <= 0) {
+    if ($sw < 20 || $sh < 20) {
         imagedestroy($src);
         return null;
     }
 
-    // Cover-crop into target aspect ratio so proportions are never distorted
-    $targetAspect = $w / (float)$h;
-    $srcAspect = $sw / (float)$sh;
-    $cropX = 0;
-    $cropY = 0;
-    $cropW = $sw;
-    $cropH = $sh;
+    $bgInfo = detectImageBackground($src);
+    $bg = $bgInfo['bg'];
+    $hasCleanBg = $bgInfo['has_clean_bg'];
 
-    if ($srcAspect > $targetAspect) {
-        $cropW = (int)round($sh * $targetAspect);
-        $cropX = (int)floor(($sw - $cropW) / 2);
-    } elseif ($srcAspect < $targetAspect) {
-        $cropH = (int)round($sw / $targetAspect);
-        $cropY = (int)floor(($sh - $cropH) / 2);
-    }
+    $cropX0 = 0;
+    $cropY0 = 0;
+    $cropX1 = $sw - 1;
+    $cropY1 = $sh - 1;
+    $cleanGrid = null;
+    $gridScale = 4;
+    $gw = 0;
+    $gh = 0;
+    $mainCompId = 0;
 
-    $dst = imagecreatetruecolor($w, $h);
-    imagealphablending($dst, true);
-    imagecopyresampled($dst, $src, 0, 0, $cropX, $cropY, $w, $h, $cropW, $cropH);
-    imagedestroy($src);
-    return $dst;
-}
+    if ($hasCleanBg) {
+        // 2D Connected-Component isolation on a fast downsampled grid:
+        // Keeps 100% of the complete wooden door/frame (including tall arches & flared cornices)
+        // while cleanly removing detached catalog header logos (e.g. top-left "SURESH TIMBERS")
+        // even when a tall temple arch rises beside the logo!
+        $gridScale = max(2, (int)floor(max($sw, $sh) / 210));
+        $gw = (int)ceil($sw / $gridScale);
+        $gh = (int)ceil($sh / $gridScale);
+        $fgGrid = array_fill(0, $gw * $gh, 0);
 
-/**
- * Samples the wall background RGB from the top-left and top-right corners.
- */
-function sampleCornerWallColor($im): array {
-    $w = imagesx($im);
-    $pts = [
-        [6, 6], [16, 6], [6, 18], [16, 18],
-        [$w - 7, 6], [$w - 17, 6], [$w - 7, 18], [$w - 17, 18],
-    ];
-    $sr = 0.0; $sg = 0.0; $sb = 0.0;
-    foreach ($pts as [$x, $y]) {
-        $rgb = imagecolorat($im, $x, $y);
-        $sr += ($rgb >> 16) & 255;
-        $sg += ($rgb >> 8) & 255;
-        $sb += $rgb & 255;
-    }
-    $n = count($pts);
-    return [$sr / $n, $sg / $n, $sb / $n];
-}
-
-/**
- * Computes color distance between a pixel and a reference wall color.
- */
-function colorDist(int $r, int $g, int $b, array $ref): float {
-    $dr = $r - $ref[0];
-    $dg = $g - $ref[1];
-    $db = $b - $ref[2];
-    return sqrt($dr * $dr + $dg * $dg + $db * $db);
-}
-
-/**
- * Checks whether a pixel is warm wood vs neutral wall (used for bounding-box detection & sampling).
- */
-function isWoodPixel(int $r, int $g, int $b, ?array $wallRef = null): bool {
-    if ($wallRef !== null && colorDist($r, $g, $b, $wallRef) < 42.0) {
-        return false;
-    }
-    $max = max($r, $g, $b);
-    $min = min($r, $g, $b);
-    $sat = $max - $min;
-    $lum = 0.299 * $r + 0.587 * $g + 0.114 * $b;
-
-    if ($lum > 185 && $sat < 42) return false;
-    if ($g > $r + 6 && $sat > 12) return false;
-    return ($r >= $b - 4) && ($lum < 215);
-}
-
-/**
- * Detects the bounding box of the wooden door/frame inside a 600x800 photo.
- * Uses the mid-section (y: 30%..80%) to measure the vertical pillar edges accurately
- * (ignoring flared top cornices!) and computes clean outer, dest-opening, and source-leaf rects.
- */
-function detectDoorBounds($im): array {
-    $w = imagesx($im);
-    $h = imagesy($im);
-    $wallRef = sampleCornerWallColor($im);
-
-    // 1) Measure outer top/bottom across full height
-    $rowScore = array_fill(0, $h, 0);
-    for ($y = 0; $y < $h; $y += 4) {
-        for ($x = 0; $x < $w; $x += 4) {
-            $rgb = imagecolorat($im, $x, $y);
-            if (isWoodPixel(($rgb >> 16) & 255, ($rgb >> 8) & 255, $rgb & 255, $wallRef)) {
-                $rowScore[$y]++;
+        for ($gy = 0; $gy < $gh; $gy++) {
+            $sy = min($sh - 1, $gy * $gridScale + (int)floor($gridScale / 2));
+            for ($gx = 0; $gx < $gw; $gx++) {
+                $sx = min($sw - 1, $gx * $gridScale + (int)floor($gridScale / 2));
+                $rgb = imagecolorat($src, $sx, $sy);
+                if (colorDist(($rgb >> 16) & 255, ($rgb >> 8) & 255, $rgb & 255, $bg) > 24.0) {
+                    $fgGrid[$gy * $gw + $gx] = 1;
+                }
             }
         }
-    }
-    $rowThresh = (int)round(($w / 4) * 0.20);
-    $top = 0;
-    for ($y = 0; $y < $h; $y += 4) {
-        if ($rowScore[$y] >= $rowThresh) { $top = $y; break; }
-    }
-    $bottom = $h - 1;
-    for ($y = $h - 4; $y >= 0; $y -= 4) {
-        if ($rowScore[$y] >= $rowThresh) { $bottom = $y; break; }
-    }
 
-    // 2) Measure left/right pillar edges in the middle 50% (y: 28%..78%) so top cornice overhang doesn't widen pillar bounds
-    $midY0 = (int)round($h * 0.28);
-    $midY1 = (int)round($h * 0.78);
-    $midRows = max(1, (int)(($midY1 - $midY0) / 4));
-    $colScore = array_fill(0, $w, 0);
-    for ($y = $midY0; $y < $midY1; $y += 4) {
-        for ($x = 0; $x < $w; $x += 4) {
-            $rgb = imagecolorat($im, $x, $y);
-            if (isWoodPixel(($rgb >> 16) & 255, ($rgb >> 8) & 255, $rgb & 255, $wallRef)) {
-                $colScore[$x]++;
+        // 1-cell morphological dilation bridges tiny 2-4px bright reflections inside wood carvings
+        $dilated = $fgGrid;
+        for ($gy = 1; $gy < $gh - 1; $gy++) {
+            $rowOff = $gy * $gw;
+            for ($gx = 1; $gx < $gw - 1; $gx++) {
+                if ($fgGrid[$rowOff + $gx] === 1) {
+                    $dilated[$rowOff + $gx - 1] = 1;
+                    $dilated[$rowOff + $gx + 1] = 1;
+                    $dilated[$rowOff - $gw + $gx] = 1;
+                    $dilated[$rowOff + $gw + $gx] = 1;
+                }
             }
         }
-    }
-    $colThresh = (int)round($midRows * 0.45);
-    // Pick the WIDEST contiguous horizontal span of wood columns so side lamps/wall objects are ignored
-    $bestLeft = 0; $bestRight = $w - 1; $bestWidth = 0;
-    $inRun = false; $runStart = 0; $gapCount = 0;
-    for ($x = 0; $x < $w; $x += 4) {
-        if ($colScore[$x] >= $colThresh) {
-            if (!$inRun) { $inRun = true; $runStart = $x; }
-            $gapCount = 0;
-        } else {
-            if ($inRun) {
-                $gapCount++;
-                if ($gapCount >= 3) { // >= 12px gap ends the run
-                    $runEnd = $x - ($gapCount * 4);
-                    if (($runEnd - $runStart) > $bestWidth) {
-                        $bestWidth = $runEnd - $runStart;
-                        $bestLeft = $runStart;
-                        $bestRight = $runEnd;
+
+        // Label connected components via BFS
+        $labels = array_fill(0, $gw * $gh, 0);
+        $compSizes = [];
+        $compBoxes = [];
+        $nextLabel = 1;
+        $queue = new SplQueue();
+
+        for ($i = 0; $i < $gw * $gh; $i++) {
+            if ($dilated[$i] === 1 && $labels[$i] === 0) {
+                $lbl = $nextLabel++;
+                $labels[$i] = $lbl;
+                $queue->enqueue($i);
+                $size = 0;
+                $minX = $gw; $maxX = 0; $minY = $gh; $maxY = 0;
+
+                while (!$queue->isEmpty()) {
+                    $idx = $queue->dequeue();
+                    $size++;
+                    $cx = $idx % $gw;
+                    $cy = intdiv($idx, $gw);
+                    if ($cx < $minX) $minX = $cx;
+                    if ($cx > $maxX) $maxX = $cx;
+                    if ($cy < $minY) $minY = $cy;
+                    if ($cy > $maxY) $maxY = $cy;
+
+                    if ($cx > 0 && $dilated[$idx - 1] === 1 && $labels[$idx - 1] === 0) {
+                        $labels[$idx - 1] = $lbl; $queue->enqueue($idx - 1);
                     }
-                    $inRun = false;
+                    if ($cx + 1 < $gw && $dilated[$idx + 1] === 1 && $labels[$idx + 1] === 0) {
+                        $labels[$idx + 1] = $lbl; $queue->enqueue($idx + 1);
+                    }
+                    if ($cy > 0 && $dilated[$idx - $gw] === 1 && $labels[$idx - $gw] === 0) {
+                        $labels[$idx - $gw] = $lbl; $queue->enqueue($idx - $gw);
+                    }
+                    if ($cy + 1 < $gh && $dilated[$idx + $gw] === 1 && $labels[$idx + $gw] === 0) {
+                        $labels[$idx + $gw] = $lbl; $queue->enqueue($idx + $gw);
+                    }
+                }
+                $compSizes[$lbl] = $size;
+                $compBoxes[$lbl] = [$minX, $minY, $maxX, $maxY];
+            }
+        }
+
+        if (!empty($compSizes)) {
+            arsort($compSizes);
+            $mainCompId = (int)array_key_first($compSizes);
+            [$bMinX, $bMinY, $bMaxX, $bMaxY] = $compBoxes[$mainCompId];
+
+            $left = max(0, $bMinX * $gridScale);
+            $top = max(0, $bMinY * $gridScale);
+            $right = min($sw - 1, ($bMaxX + 1) * $gridScale);
+            $bottom = min($sh - 1, ($bMaxY + 1) * $gridScale);
+
+            // Refine bounding box edges to exact pixel precision using the main component mask
+            if (($right - $left) >= (int)($sw * 0.22) && ($bottom - $top) >= (int)($sh * 0.28)) {
+                $cropX0 = max(0, $left - 2);
+                $cropY0 = max(0, $top - 2);
+                $cropX1 = min($sw - 1, $right + 2);
+                $cropY1 = min($sh - 1, $bottom + 2);
+                $cleanGrid = $labels;
+            }
+        }
+    }
+
+    $ow = max(1, $cropX1 - $cropX0 + 1);
+    $oh = max(1, $cropY1 - $cropY0 + 1);
+    $obj = imagecreatetruecolor($ow, $oh);
+    imagealphablending($obj, true);
+    imagecopy($obj, $src, 0, 0, $cropX0, $cropY0, $ow, $oh);
+    imagedestroy($src);
+
+    // Erase any detached non-door components (e.g. header logo overlapping the crown's bounding box)
+    if ($cleanGrid !== null && $mainCompId > 0) {
+        $bgInt = (clampByte($bg[0]) << 16) | (clampByte($bg[1]) << 8) | clampByte($bg[2]);
+        for ($oy = 0; $oy < $oh; $oy++) {
+            $gy = min($gh - 1, intdiv($cropY0 + $oy, $gridScale));
+            $rowOff = $gy * $gw;
+            for ($ox = 0; $ox < $ow; $ox++) {
+                $gx = min($gw - 1, intdiv($cropX0 + $ox, $gridScale));
+                $lbl = $cleanGrid[$rowOff + $gx];
+                if ($lbl !== 0 && $lbl !== $mainCompId) {
+                    imagesetpixel($obj, $ox, $oy, $bgInt);
                 }
             }
         }
     }
-    if ($inRun) {
-        $runEnd = $w - 1 - ($gapCount * 4);
-        if (($runEnd - $runStart) > $bestWidth) {
-            $bestWidth = $runEnd - $runStart;
-            $bestLeft = $runStart;
-            $bestRight = $runEnd;
+
+    // 3) Analyze structure: Framed Door (pillars + crown) vs Pure Shutter Slab vs Landscape Material
+    $aspect = $ow / (float)$oh;
+
+    $measureRowSpan = function (int $y) use ($obj, $ow, $bg, $hasCleanBg): array {
+        $y = max(0, min(imagesy($obj) - 1, $y));
+        if (!$hasCleanBg) return [0, $ow - 1, $ow];
+        $l = $ow; $r = 0; $fg = 0;
+        for ($x = 0; $x < $ow; $x += 2) {
+            $rgb = imagecolorat($obj, $x, $y);
+            if (colorDist(($rgb >> 16) & 255, ($rgb >> 8) & 255, $rgb & 255, $bg) > 26.0) {
+                if ($x < $l) $l = $x;
+                if ($x > $r) $r = $x;
+                $fg += 2;
+            }
         }
+        if ($r < $l) return [0, $ow - 1, 0];
+        return [$l, $r, $fg];
+    };
+
+    $topSpan = $measureRowSpan((int)round($oh * 0.05));
+    $crownSpan = $measureRowSpan((int)round($oh * 0.10));
+    $midSpan1 = $measureRowSpan((int)round($oh * 0.45));
+    $midSpan2 = $measureRowSpan((int)round($oh * 0.65));
+
+    $topFill = $topSpan[2] / max(1.0, (float)$ow);
+    $topOuterW = max($topSpan[1] - $topSpan[0], $crownSpan[1] - $crownSpan[0]);
+    $midLeft = (int)round(($midSpan1[0] + $midSpan2[0]) / 2.0);
+    $midRight = (int)round(($midSpan1[1] + $midSpan2[1]) / 2.0);
+    $midOuterW = max(1, $midRight - $midLeft);
+
+    $hasArchedCrown = $hasCleanBg && ($topFill < 0.86);
+    $hasFlaredCrown = $hasCleanBg && ($topOuterW > $midOuterW * 1.035);
+    $isLandscapeMaterial = ($aspect > 1.05);
+
+    $titleLow = strtolower((string)($meta['title'] ?? '') . ' ' . (string)($meta['carving_style'] ?? ''));
+    $metaSuggestsFrame = (
+        strpos($titleLow, 'nilai') !== false ||
+        strpos($titleLow, 'wood frame') !== false ||
+        strpos($titleLow, 'pillar') !== false ||
+        strpos($titleLow, 'crown') !== false
+    );
+
+    // Framed door detection (pillars/jambs around inner door leaf)
+    $isFramed = !$isLandscapeMaterial && ($hasArchedCrown || $hasFlaredCrown || $aspect >= 0.60 || ($metaSuggestsFrame && $aspect >= 0.55));
+
+    // 4) Detect inner door opening & crown/lintel boundary
+    if ($isFramed) {
+        // Detect symmetric pillar width using recessed vertical shadow + horizontal gradient inside y=36%..82%
+        $yScan0 = (int)round($oh * 0.36);
+        $yScan1 = (int)round($oh * 0.82);
+        $bestPillarFrac = ($aspect >= 0.70) ? 0.21 : 0.185;
+        $bestScore = -1e9;
+
+        for ($pct = 14; $pct <= 29; $pct++) {
+            $frac = $pct / 100.0;
+            $xl = $midLeft + (int)round($midOuterW * $frac);
+            $xr = $midRight - (int)round($midOuterW * $frac);
+            if ($xl < 4 || $xr > $ow - 5 || $xr - $xl < (int)($midOuterW * 0.38)) continue;
+
+            $darkSum = 0.0;
+            $edgeSum = 0.0;
+            $n = 0;
+            for ($y = $yScan0; $y <= $yScan1; $y += 4) {
+                $rgbL = imagecolorat($obj, $xl, $y);
+                $lumL = 0.299 * (($rgbL >> 16) & 255) + 0.587 * (($rgbL >> 8) & 255) + 0.114 * ($rgbL & 255);
+                $rgbL1 = imagecolorat($obj, max(0, $xl - 3), $y);
+                $lumL1 = 0.299 * (($rgbL1 >> 16) & 255) + 0.587 * (($rgbL1 >> 8) & 255) + 0.114 * ($rgbL1 & 255);
+                $rgbL2 = imagecolorat($obj, min($ow - 1, $xl + 3), $y);
+                $lumL2 = 0.299 * (($rgbL2 >> 16) & 255) + 0.587 * (($rgbL2 >> 8) & 255) + 0.114 * ($rgbL2 & 255);
+
+                $rgbR = imagecolorat($obj, $xr, $y);
+                $lumR = 0.299 * (($rgbR >> 16) & 255) + 0.587 * (($rgbR >> 8) & 255) + 0.114 * ($rgbR & 255);
+                $rgbR1 = imagecolorat($obj, max(0, $xr - 3), $y);
+                $lumR1 = 0.299 * (($rgbR1 >> 16) & 255) + 0.587 * (($rgbR1 >> 8) & 255) + 0.114 * ($rgbR1 & 255);
+                $rgbR2 = imagecolorat($obj, min($ow - 1, $xr + 3), $y);
+                $lumR2 = 0.299 * (($rgbR2 >> 16) & 255) + 0.587 * (($rgbR2 >> 8) & 255) + 0.114 * ($rgbR2 & 255);
+
+                // Recessed jamb shadow is darker than its neighbors and has sharp edge contrast
+                $darkSum += (255.0 - $lumL) + (255.0 - $lumR);
+                $edgeSum += abs($lumL2 - $lumL1) + abs($lumR1 - $lumR2);
+                $n++;
+            }
+            if ($n > 0) {
+                $prior = 1.0 - abs($frac - 0.20) * 1.4;
+                $score = (($darkSum / $n) * 0.45 + ($edgeSum / $n) * 1.15) * max(0.65, $prior);
+                if ($score > $bestScore) {
+                    $bestScore = $score;
+                    $bestPillarFrac = $frac;
+                }
+            }
+        }
+
+        $innerL = $midLeft + (int)round($midOuterW * $bestPillarFrac);
+        $innerR = $midRight - (int)round($midOuterW * $bestPillarFrac);
+
+        // Detect horizontal recessed lintel shadow line separating crown/header from door leaf
+        $lintelMinY = (int)round($oh * ($hasArchedCrown ? 0.19 : 0.11));
+        $lintelMaxY = (int)round($oh * ($hasArchedCrown ? 0.36 : 0.28));
+        $bestLintelY = (int)round($oh * ($hasArchedCrown ? 0.24 : 0.16));
+        $bestLintelScore = -1e9;
+
+        for ($y = $lintelMinY; $y <= $lintelMaxY; $y += 2) {
+            $darkSum = 0.0;
+            $edgeSum = 0.0;
+            $n = 0;
+            for ($x = $innerL + 8; $x <= $innerR - 8; $x += 4) {
+                $rgb = imagecolorat($obj, $x, $y);
+                $lum = 0.299 * (($rgb >> 16) & 255) + 0.587 * (($rgb >> 8) & 255) + 0.114 * ($rgb & 255);
+                $rgbUp = imagecolorat($obj, $x, max(0, $y - 3));
+                $lumUp = 0.299 * (($rgbUp >> 16) & 255) + 0.587 * (($rgbUp >> 8) & 255) + 0.114 * ($rgbUp & 255);
+                $rgbDn = imagecolorat($obj, $x, min($oh - 1, $y + 3));
+                $lumDn = 0.299 * (($rgbDn >> 16) & 255) + 0.587 * (($rgbDn >> 8) & 255) + 0.114 * ($rgbDn & 255);
+                $darkSum += (255.0 - $lum);
+                $edgeSum += abs($lumDn - $lumUp);
+                $n++;
+            }
+            if ($n > 0) {
+                $score = ($darkSum / $n) * 0.55 + ($edgeSum / $n) * 1.15;
+                if ($score > $bestLintelScore) {
+                    $bestLintelScore = $score;
+                    $bestLintelY = $y;
+                }
+            }
+        }
+
+        // Detect bottom threshold step if present (stay cleanly above plinth/floor step)
+        $innerB = (int)round($oh * 0.945);
+        $bestBotScore = -1e9;
+        for ($y = (int)round($oh * 0.89); $y <= (int)round($oh * 0.985); $y += 2) {
+            $darkSum = 0.0;
+            $edgeSum = 0.0;
+            $n = 0;
+            for ($x = $innerL + 8; $x <= $innerR - 8; $x += 4) {
+                $rgb = imagecolorat($obj, $x, $y);
+                $lum = 0.299 * (($rgb >> 16) & 255) + 0.587 * (($rgb >> 8) & 255) + 0.114 * ($rgb & 255);
+                $rgbUp = imagecolorat($obj, $x, max(0, $y - 3));
+                $lumUp = 0.299 * (($rgbUp >> 16) & 255) + 0.587 * (($rgbUp >> 8) & 255) + 0.114 * ($rgbUp & 255);
+                $rgbDn = imagecolorat($obj, $x, min($oh - 1, $y + 3));
+                $lumDn = 0.299 * (($rgbDn >> 16) & 255) + 0.587 * (($rgbDn >> 8) & 255) + 0.114 * ($rgbDn & 255);
+                $darkSum += (255.0 - $lum);
+                $edgeSum += abs($lumDn - $lumUp);
+                $n++;
+            }
+            if ($n > 0) {
+                $score = ($darkSum / $n) * 0.45 + ($edgeSum / $n) * 1.0;
+                if ($score > $bestBotScore) {
+                    $bestBotScore = $score;
+                    $innerB = $y;
+                }
+            }
+        }
+
+        $innerRect = [
+            'x' => $innerL,
+            'y' => $bestLintelY,
+            'w' => max(60, $innerR - $innerL),
+            'h' => max(100, $innerB - $bestLintelY),
+        ];
+        // Source leaf cutout inside a framed door (tiny 2% inset to avoid jamb shadow bleed)
+        $srcLeafRect = [
+            'x' => $innerRect['x'] + (int)round($innerRect['w'] * 0.025),
+            'y' => $innerRect['y'] + (int)round($innerRect['h'] * 0.02),
+            'w' => max(50, (int)round($innerRect['w'] * 0.95)),
+            'h' => max(80, (int)round($innerRect['h'] * 0.96)),
+        ];
+        $crownBottomY = $bestLintelY;
+    } else {
+        // Pure door shutter / slab (NO outer Nilai frame) — keep 96% intact when used as leaf!
+        $srcLeafRect = [
+            'x' => (int)round($ow * 0.02),
+            'y' => (int)round($oh * 0.02),
+            'w' => max(50, (int)round($ow * 0.96)),
+            'h' => max(80, (int)round($oh * 0.96)),
+        ];
+        // When a pure shutter serves as the outer frame border, nest inner carving cleanly inside its stiles/rails
+        $innerRect = [
+            'x' => (int)round($ow * 0.125),
+            'y' => (int)round($oh * 0.095),
+            'w' => max(50, (int)round($ow * 0.75)),
+            'h' => max(80, (int)round($oh * 0.81)),
+        ];
+        $crownBottomY = (int)round($oh * 0.15);
     }
-    $left = $bestLeft;
-    $right = $bestRight;
-
-    // Sanity clamp for close-up / edge-to-edge photos
-    if ($right - $left < (int)($w * 0.45)) {
-        $left = (int)round($w * 0.12);
-        $right = (int)round($w * 0.88);
-    }
-    if ($bottom - $top < (int)($h * 0.50)) {
-        $top = (int)round($h * 0.04);
-        $bottom = (int)round($h * 0.96);
-    }
-
-    $dw = $right - $left;
-    $dh = $bottom - $top;
-
-    // Destination opening sits snugly inside the frame pillars and above the threshold
-    $dstInner = [
-        'x' => $left + (int)round($dw * 0.165),
-        'y' => $top + (int)round($dh * 0.235),
-        'w' => max(80, (int)round($dw * 0.67)),
-        'h' => max(120, (int)round($dh * 0.69)),
-    ];
-
-    // Source door-leaf cutout is slightly tighter horizontally/vertically so side pillars & threshold never bleed in
-    $srcLeaves = [
-        'x' => $left + (int)round($dw * 0.195),
-        'y' => $top + (int)round($dh * 0.245),
-        'w' => max(80, (int)round($dw * 0.61)),
-        'h' => max(120, (int)round($dh * 0.655)),
-    ];
 
     return [
-        'wall' => $wallRef,
-        'outer' => ['x' => $left, 'y' => $top, 'w' => $dw, 'h' => $dh],
-        'inner' => $dstInner,
-        'leaves' => $srcLeaves,
+        'img' => $obj,
+        'w' => $ow,
+        'h' => $oh,
+        'aspect' => $aspect,
+        'bg' => $bg,
+        'has_clean_bg' => $hasCleanBg,
+        'is_framed' => $isFramed,
+        'is_landscape' => $isLandscapeMaterial,
+        'has_arched_crown' => $hasArchedCrown,
+        'has_flared_crown' => $hasFlaredCrown,
+        'mid_left' => $midLeft,
+        'mid_right' => $midRight,
+        'inner' => $innerRect,
+        'leaf' => $srcLeafRect,
+        'crown_bottom_y' => $crownBottomY,
     ];
 }
 
@@ -241,26 +472,70 @@ function sampleAverageWoodColor($im, int $x0, int $y0, int $rw, int $rh, ?array 
             }
         }
     }
-    if ($cnt < 20) return [138.0, 90.0, 48.0];
+    if ($cnt < 15) return [138.0, 90.0, 48.0];
     return [$sumR / $cnt, $sumG / $cnt, $sumB / $cnt];
 }
 
 /**
- * Composites a cropped region from $srcImg into $dstImg at $dstRect
- * with smooth wood-color matching, feathered seams, optional recessed shadow,
- * and smooth corner-wall alpha cutout (for arches/crowns).
+ * Blits an extracted object cleanly onto the crisp studio canvas with optional
+ * white-background cleanup (turning off-white JPEG halos into pure canvas backdrop).
  */
-function compositeRegionMatched(
+function blitCleanObjectToCanvas($canvas, array $objData, int $dstX, int $dstY, int $dstW, int $dstH, array $canvasBg): void {
+    $tmp = imagecreatetruecolor($dstW, $dstH);
+    imagecopyresampled($tmp, $objData['img'], 0, 0, 0, 0, $dstW, $dstH, $objData['w'], $objData['h']);
+
+    $cw = imagesx($canvas);
+    $ch = imagesy($canvas);
+    $hasCleanBg = $objData['has_clean_bg'];
+    $srcBg = $objData['bg'];
+
+    for ($py = 0; $py < $dstH; $py++) {
+        $cy = $dstY + $py;
+        if ($cy < 0 || $cy >= $ch) continue;
+        for ($px = 0; $px < $dstW; $px++) {
+            $cx = $dstX + $px;
+            if ($cx < 0 || $cx >= $cw) continue;
+
+            $rgb = imagecolorat($tmp, $px, $py);
+            $r = ($rgb >> 16) & 255;
+            $g = ($rgb >> 8) & 255;
+            $b = $rgb & 255;
+
+            if ($hasCleanBg) {
+                $d = colorDist($r, $g, $b, $srcBg);
+                if ($d <= 22.0) continue; // Keep pure crisp canvas backdrop
+                if ($d < 44.0) {
+                    $alpha = smoothstep(22.0, 44.0, $d);
+                    $or = clampByte($canvasBg[0] * (1.0 - $alpha) + $r * $alpha);
+                    $og = clampByte($canvasBg[1] * (1.0 - $alpha) + $g * $alpha);
+                    $ob = clampByte($canvasBg[2] * (1.0 - $alpha) + $b * $alpha);
+                    imagesetpixel($canvas, $cx, $cy, ($or << 16) | ($og << 8) | $ob);
+                    continue;
+                }
+            }
+            imagesetpixel($canvas, $cx, $cy, $rgb);
+        }
+    }
+    imagedestroy($tmp);
+}
+
+/**
+ * Composites a door shutter, center carving, or crown cleanly onto the canvas
+ * with natural wood-tone harmonization, crisp anti-aliased seams, optional recessed
+ * inner-jamb shadow, and clean background transparency for curved crowns.
+ */
+function compositeRegionClean(
     $dstImg,
     $srcImg,
     array $srcRect,
     array $dstRect,
     array $targetWoodRgb,
-    int $feather = 14,
+    int $feather = 8,
     bool $addRecessShadow = true,
     bool $isCrownOverlay = false,
-    ?array $srcWallRef = null,
-    ?array $dstWallRef = null
+    bool $srcHasCleanBg = false,
+    ?array $srcBg = null,
+    bool $roundedMask = false
 ): void {
     $dw = max(1, (int)$dstRect['w']);
     $dh = max(1, (int)$dstRect['h']);
@@ -277,13 +552,13 @@ function compositeRegionMatched(
         max(1, (int)$srcRect['w']), max(1, (int)$srcRect['h'])
     );
 
-    $srcWood = sampleAverageWoodColor($patch, 0, 0, $dw, $dh, $srcWallRef);
-    $gainR = max(0.70, min(1.38, $targetWoodRgb[0] / max(20.0, $srcWood[0])));
-    $gainG = max(0.70, min(1.38, $targetWoodRgb[1] / max(20.0, $srcWood[1])));
-    $gainB = max(0.68, min(1.35, $targetWoodRgb[2] / max(20.0, $srcWood[2])));
+    $srcWood = sampleAverageWoodColor($patch, 0, 0, $dw, $dh, $srcHasCleanBg ? $srcBg : null);
+    $gainR = max(0.76, min(1.30, $targetWoodRgb[0] / max(22.0, $srcWood[0])));
+    $gainG = max(0.76, min(1.30, $targetWoodRgb[1] / max(22.0, $srcWood[1])));
+    $gainB = max(0.74, min(1.28, $targetWoodRgb[2] / max(22.0, $srcWood[2])));
 
-    // Smooth blend toward target wood tone so source carving texture looks carved from the same timber
-    $mix = 0.78;
+    // Gentle wood-tone matching so source carving keeps its rich crisp highlights & brass glow
+    $mix = $isCrownOverlay ? 0.72 : 0.62;
     $gR = 1.0 + ($gainR - 1.0) * $mix;
     $gG = 1.0 + ($gainG - 1.0) * $mix;
     $gB = 1.0 + ($gainB - 1.0) * $mix;
@@ -305,19 +580,6 @@ function compositeRegionMatched(
             if ($py > $dh - $feather) $alphaY = min($alphaY, smoothstep(0.0, (float)$feather, (float)($dh - $py)));
         }
 
-        // Sample clean local wall color at same row on base canvas so old cornice corners erase cleanly behind curved arches
-        $rowWallRgb = $dstWallRef;
-        if ($isCrownOverlay && $dstWallRef !== null) {
-            $sampleX = max(4, min($canvasW - 5, $dx - 14));
-            $wRgb = imagecolorat($dstImg, $sampleX, $cy);
-            $wr = ($wRgb >> 16) & 255;
-            $wg = ($wRgb >> 8) & 255;
-            $wb = $wRgb & 255;
-            if (colorDist($wr, $wg, $wb, $dstWallRef) < 55.0) {
-                $rowWallRgb = [(float)$wr, (float)$wg, (float)$wb];
-            }
-        }
-
         for ($px = 0; $px < $dw; $px++) {
             $cx = $dx + $px;
             if ($cx < 0 || $cx >= $canvasW) continue;
@@ -332,55 +594,39 @@ function compositeRegionMatched(
                 if ($px < $feather) $alphaX = min($alphaX, smoothstep(0.0, (float)$feather, (float)$px));
                 if ($px > $dw - $feather) $alphaX = min($alphaX, smoothstep(0.0, (float)$feather, (float)($dw - $px)));
             } else {
-                if ($px < 10) $alphaX = min($alphaX, smoothstep(0.0, 10.0, (float)$px));
-                if ($px > $dw - 10) $alphaX = min($alphaX, smoothstep(0.0, 10.0, (float)($dw - $px)));
+                if ($px < 4) $alphaX = min($alphaX, smoothstep(0.0, 4.0, (float)$px));
+                if ($px > $dw - 4) $alphaX = min($alphaX, smoothstep(0.0, 4.0, (float)($dw - $px)));
             }
 
-            if ($isCrownOverlay && $srcWallRef !== null && $rowWallRgb !== null) {
-                // Smoothly replace the entire crown band: wood pixels get color-matched crown,
-                // wall pixels around curved arch get cleanly filled with base wall color (erasing old cornice!)
-                $dist = colorDist($sr, $sg, $sb, $srcWallRef);
-                $woodAmt = smoothstep(38.0, 74.0, $dist);
+            $alpha = $alphaX * $alphaY;
 
-                // Sample clean wall right at top edge (y=10) at same X for smooth horizontal light matching
-                $topRgb = imagecolorat($dstImg, $cx, 10);
-                $trw = ($topRgb >> 16) & 255; $tgw = ($topRgb >> 8) & 255; $tbw = $topRgb & 255;
-                $localWall = (colorDist($trw, $tgw, $tbw, $dstWallRef) < 55.0)
-                    ? [(float)$trw, (float)$tgw, (float)$tbw]
-                    : $rowWallRgb;
-
-                $nr = clampByte($sr * $gR) * $woodAmt + $localWall[0] * (1.0 - $woodAmt);
-                $ng = clampByte($sg * $gG) * $woodAmt + $localWall[1] * (1.0 - $woodAmt);
-                $nb = clampByte($sb * $gB) * $woodAmt + $localWall[2] * (1.0 - $woodAmt);
-
-                $alpha = max(0.0, min(1.0, $alphaX * $alphaY));
-                if ($alpha <= 0.002) continue;
-
-                $dRgb = imagecolorat($dstImg, $cx, $cy);
-                $dr = ($dRgb >> 16) & 255;
-                $dg = ($dRgb >> 8) & 255;
-                $db = $dRgb & 255;
-                $or = clampByte($dr * (1.0 - $alpha) + $nr * $alpha);
-                $og = clampByte($dg * (1.0 - $alpha) + $ng * $alpha);
-                $ob = clampByte($db * (1.0 - $alpha) + $nb * $alpha);
-                imagesetpixel($dstImg, $cx, $cy, ($or << 16) | ($og << 8) | $ob);
-                continue;
+            // Optional soft rounded vignette mask for center medallion blending
+            if ($roundedMask) {
+                $nx = ($px / max(1.0, (float)($dw - 1))) * 2.0 - 1.0;
+                $ny = ($py / max(1.0, (float)($dh - 1))) * 2.0 - 1.0;
+                $rad = pow(abs($nx), 4.0) + pow(abs($ny), 4.0);
+                $alpha *= (1.0 - smoothstep(0.58, 1.02, $rad));
             }
 
-            $alpha = max(0.0, min(1.0, $alphaX * $alphaY));
-            if ($alpha <= 0.002) continue;
+            // Transparent cutout for curved/arched crowns over studio backdrop
+            if ($isCrownOverlay && $srcHasCleanBg && $srcBg !== null) {
+                $dist = colorDist($sr, $sg, $sb, $srcBg);
+                $woodAmt = smoothstep(22.0, 48.0, $dist);
+                $alpha *= $woodAmt;
+            }
 
-            // Smoothly color-match all pixels inside the wooden patch (zero hard-cutoff speckles!)
+            if ($alpha <= 0.003) continue;
+
             $nr = clampByte($sr * $gR);
             $ng = clampByte($sg * $gG);
             $nb = clampByte($sb * $gB);
 
-            // Realistic recessed door-frame shadow along top, left & right edges
+            // Subtle natural recessed frame shadow inside doorway jambs
             if ($addRecessShadow) {
                 $shadow = 1.0;
-                if ($py < 12) $shadow = min($shadow, 0.72 + 0.28 * ($py / 12.0));
-                if ($px < 10) $shadow = min($shadow, 0.76 + 0.24 * ($px / 10.0));
-                if ($px > $dw - 10) $shadow = min($shadow, 0.76 + 0.24 * (($dw - $px) / 10.0));
+                if ($py < 11) $shadow = min($shadow, 0.74 + 0.26 * ($py / 11.0));
+                if ($px < 9) $shadow = min($shadow, 0.78 + 0.22 * ($px / 9.0));
+                if ($px > $dw - 9) $shadow = min($shadow, 0.78 + 0.22 * (($dw - $px) / 9.0));
                 if ($shadow < 0.999) {
                     $nr = clampByte($nr * $shadow);
                     $ng = clampByte($ng * $shadow);
@@ -388,7 +634,7 @@ function compositeRegionMatched(
                 }
             }
 
-            if ($alpha >= 0.998) {
+            if ($alpha >= 0.996) {
                 imagesetpixel($dstImg, $cx, $cy, ($nr << 16) | ($ng << 8) | $nb);
             } else {
                 $dRgb = imagecolorat($dstImg, $cx, $cy);
@@ -407,8 +653,8 @@ function compositeRegionMatched(
 }
 
 /**
- * Applies smooth, speckle-free wood-stain polish grading ONLY inside the door silhouette,
- * keeping walls, floor tiles, and wood grain highlights smooth and natural.
+ * Applies smooth, speckle-free wood-stain polish grading ONLY inside the wooden door,
+ * leaving the crisp studio backdrop untouched.
  */
 function applyPolishShadeGrading(
     $im,
@@ -419,11 +665,11 @@ function applyPolishShadeGrading(
 ): void {
     $profiles = [
         'Natural Teak Matte'      => ['r' => 1.00, 'g' => 1.00, 'b' => 1.00, 'contrast' => 1.00, 'strength' => 0.0],
-        'Honey Gold Gloss'        => ['r' => 1.12, 'g' => 1.04, 'b' => 0.80, 'contrast' => 1.07, 'strength' => 0.65],
-        'Dark Walnut Satin'       => ['r' => 0.64, 'g' => 0.56, 'b' => 0.50, 'contrast' => 1.06, 'strength' => 0.80],
-        'Royal Rosewood Gloss'    => ['r' => 0.82, 'g' => 0.52, 'b' => 0.46, 'contrast' => 1.08, 'strength' => 0.82],
-        'Antique Heritage Finish' => ['r' => 0.84, 'g' => 0.72, 'b' => 0.58, 'contrast' => 1.06, 'strength' => 0.72],
-        'Natural PU Clear'        => ['r' => 1.05, 'g' => 1.03, 'b' => 0.96, 'contrast' => 1.04, 'strength' => 0.45],
+        'Honey Gold Gloss'        => ['r' => 1.12, 'g' => 1.04, 'b' => 0.80, 'contrast' => 1.06, 'strength' => 0.62],
+        'Dark Walnut Satin'       => ['r' => 0.66, 'g' => 0.58, 'b' => 0.52, 'contrast' => 1.05, 'strength' => 0.78],
+        'Royal Rosewood Gloss'    => ['r' => 0.84, 'g' => 0.54, 'b' => 0.48, 'contrast' => 1.06, 'strength' => 0.78],
+        'Antique Heritage Finish' => ['r' => 0.86, 'g' => 0.74, 'b' => 0.60, 'contrast' => 1.05, 'strength' => 0.68],
+        'Natural PU Clear'        => ['r' => 1.04, 'g' => 1.02, 'b' => 0.96, 'contrast' => 1.04, 'strength' => 0.42],
     ];
 
     $p = $profiles[$polishShade] ?? $profiles['Natural Teak Matte'];
@@ -434,9 +680,9 @@ function applyPolishShadeGrading(
     if ($customFinishRgb !== null) {
         $baseWood = sampleAverageWoodColor($im, $outerRect['x'], $outerRect['y'], $outerRect['w'], $outerRect['h'], $wallRef);
         $finishGain = [
-            max(0.72, min(1.30, $customFinishRgb[0] / max(20.0, $baseWood[0]))),
-            max(0.72, min(1.30, $customFinishRgb[1] / max(20.0, $baseWood[1]))),
-            max(0.70, min(1.28, $customFinishRgb[2] / max(20.0, $baseWood[2]))),
+            max(0.74, min(1.28, $customFinishRgb[0] / max(22.0, $baseWood[0]))),
+            max(0.74, min(1.28, $customFinishRgb[1] / max(22.0, $baseWood[1]))),
+            max(0.72, min(1.26, $customFinishRgb[2] / max(22.0, $baseWood[2]))),
         ];
         $hasFinish = true;
     }
@@ -447,11 +693,10 @@ function applyPolishShadeGrading(
     $h = imagesy($im);
     $contrast = (float)$p['contrast'];
 
-    // Expand outer rect slightly to cover flared top crown while still excluding wall/floor margins
-    $bx0 = max(0, $outerRect['x'] - 48);
-    $by0 = max(0, $outerRect['y'] - 10);
-    $bx1 = min($w - 1, $outerRect['x'] + $outerRect['w'] + 48);
-    $by1 = min($h - 1, $outerRect['y'] + $outerRect['h'] + 8);
+    $bx0 = max(0, $outerRect['x'] - 24);
+    $by0 = max(0, $outerRect['y'] - 24);
+    $bx1 = min($w - 1, $outerRect['x'] + $outerRect['w'] + 24);
+    $by1 = min($h - 1, $outerRect['y'] + $outerRect['h'] + 10);
 
     for ($y = $by0; $y <= $by1; $y++) {
         for ($x = $bx0; $x <= $bx1; $x++) {
@@ -460,15 +705,13 @@ function applyPolishShadeGrading(
             $g = ($rgb >> 8) & 255;
             $b = $rgb & 255;
 
-            // Smooth wood mask: smoothly fades to 0 near wall color (ZERO speckles or sharp edges!)
             $distFromWall = colorDist($r, $g, $b, $wallRef);
-            $wallMask = smoothstep(32.0, 75.0, $distFromWall);
+            $wallMask = smoothstep(26.0, 62.0, $distFromWall);
             if ($wallMask <= 0.002) continue;
 
-            // Smooth warm-tone mask so cool gray floor tiles stay neutral
             $warmth = (float)($r - $b);
             $lum = 0.299 * $r + 0.587 * $g + 0.114 * $b;
-            $warmMask = ($lum < 90.0) ? 1.0 : smoothstep(-4.0, 18.0, $warmth);
+            $warmMask = ($lum < 95.0) ? 1.0 : smoothstep(-4.0, 18.0, $warmth);
             $mask = $wallMask * $warmMask;
             if ($mask <= 0.002) continue;
 
@@ -477,7 +720,7 @@ function applyPolishShadeGrading(
             $nb = (float)$b;
 
             if ($hasFinish) {
-                $fMix = 0.45 * $mask;
+                $fMix = 0.42 * $mask;
                 $nr = $nr * (1.0 + ($finishGain[0] - 1.0) * $fMix);
                 $ng = $ng * (1.0 + ($finishGain[1] - 1.0) * $fMix);
                 $nb = $nb * (1.0 + ($finishGain[2] - 1.0) * $fMix);
@@ -485,12 +728,9 @@ function applyPolishShadeGrading(
 
             if ($strength > 0.01) {
                 $s = $strength * $mask;
-                $tr = $nr * $p['r'];
-                $tg = $ng * $p['g'];
-                $tb = $nb * $p['b'];
-                $nr = $nr * (1.0 - $s) + $tr * $s;
-                $ng = $ng * (1.0 - $s) + $tg * $s;
-                $nb = $nb * (1.0 - $s) + $tb * $s;
+                $nr = $nr * (1.0 - $s) + ($nr * $p['r']) * $s;
+                $ng = $ng * (1.0 - $s) + ($ng * $p['g']) * $s;
+                $nb = $nb * (1.0 - $s) + ($nb * $p['b']) * $s;
 
                 if (abs($contrast - 1.0) > 0.005) {
                     $c = 1.0 + ($contrast - 1.0) * $mask;
@@ -506,8 +746,41 @@ function applyPolishShadeGrading(
 }
 
 /**
+ * Adds a subtle, natural studio contact shadow directly under the bottom of the door.
+ */
+function drawStudioFloorShadow($canvas, int $leftX, int $rightX, int $bottomY): void {
+    $cw = imagesx($canvas);
+    $ch = imagesy($canvas);
+    $shadowH = min(14, max(4, $ch - $bottomY - 4));
+    if ($shadowH < 4) return;
+
+    $cx = ($leftX + $rightX) / 2.0;
+    $halfW = max(20.0, ($rightX - $leftX) / 2.0 + 12.0);
+    $x0 = max(0, (int)floor($cx - $halfW));
+    $x1 = min($cw - 1, (int)ceil($cx + $halfW));
+
+    for ($dy = 0; $dy < $shadowH; $dy++) {
+        $y = $bottomY + $dy;
+        if ($y < 0 || $y >= $ch) continue;
+        $vy = 1.0 - ($dy / (float)$shadowH);
+        $vy = $vy * $vy;
+        for ($x = $x0; $x <= $x1; $x++) {
+            $nx = abs($x - $cx) / $halfW;
+            if ($nx >= 1.0) continue;
+            $vx = 1.0 - ($nx * $nx);
+            $alpha = 0.16 * $vy * $vx;
+            $rgb = imagecolorat($canvas, $x, $y);
+            $r = clampByte((($rgb >> 16) & 255) * (1.0 - $alpha));
+            $g = clampByte((($rgb >> 8) & 255) * (1.0 - $alpha));
+            $b = clampByte(($rgb & 255) * (1.0 - $alpha));
+            imagesetpixel($canvas, $x, $y, ($r << 16) | ($g << 8) | $b);
+        }
+    }
+}
+
+/**
  * Optional Real Generative AI call via Google Gemini API (when GEMINI_API_KEY is set in config.php).
- * Sends the actual selected catalog door images + combination prompt so Gemini renders a true AI hybrid door.
+ * Explicitly mandates full-length uncropped framing with clean margins on all four sides.
  */
 function tryGeminiAiCombine(array $opts, string $promptText, string $fullPath): bool {
     if (!defined('GEMINI_API_KEY') || trim((string)GEMINI_API_KEY) === '' || !function_exists('curl_init')) {
@@ -539,7 +812,8 @@ function tryGeminiAiCombine(array $opts, string $promptText, string $fullPath): 
     }
 
     $parts[] = [
-        'text' => "Create a single ultra-realistic straight-on architectural showroom photograph (vertical 3:4 portrait, natural daylight against a warm cream wall, zero text or watermarks) of ONE unified custom handcrafted Indian wooden door combining the reference images exactly as instructed: $promptText",
+        'text' => "Create a single ultra-sharp, crystal-clear straight-on architectural studio photograph (vertical 3:4 portrait) of ONE unified custom handcrafted Indian wooden door combining the reference images exactly as instructed: $promptText "
+            . "STRICT FRAMING & CLARITY RULES: Show 100% of the ENTIRE door and full frame from the very top tip of the crown/arch down to the bottom floor threshold, centered with generous clean white/warm-cream studio margin on ALL FOUR SIDES (top, bottom, left, right). NEVER crop, cut off, or zoom into any part of the door, pillars, crown, or carvings. Crisp natural daylight, sharp fine wood carving details, zero text, zero logos, zero watermarks.",
     ];
 
     $model = defined('GEMINI_IMAGE_MODEL') && GEMINI_IMAGE_MODEL ? GEMINI_IMAGE_MODEL : 'gemini-2.5-flash-image';
@@ -592,11 +866,14 @@ function tryGeminiAiCombine(array $opts, string $promptText, string $fullPath): 
 }
 
 /**
- * Photorealistic door combiner & renderer for cPanel PHP + GD:
+ * High-clarity, zero-crop photorealistic door combiner & renderer for cPanel PHP + GD:
  *  1) Uses Gemini multimodal image AI if GEMINI_API_KEY is configured.
- *  2) Otherwise composites the ACTUAL selected catalog reference photos (Frame Style,
- *     Top Arch & Crown, Center Carving, Panel Layout, Border / Polish Finish) with
- *     wood-tone matching, recessed shadows, feathered seams, and smooth polish grading.
+ *  2) Otherwise extracts the COMPLETE uncropped door/frame objects from the selected
+ *     catalog photos (removing header logos, NEVER cover-cropping), places the outer
+ *     frame structure on a crisp high-res 720x960 studio canvas with generous margins
+ *     on all 4 sides, cleanly mounts Top Arch & Crown, nests Panel Layout / Center Carving
+ *     inside the doorway with wood-tone matching & subtle recessed jamb shadow, and
+ *     applies speckle-free polish grading.
  *  3) Falls back to procedural GD door rendering only if no reference photos exist on disk.
  */
 function renderDoorPngPhp(array $opts): array {
@@ -627,33 +904,32 @@ function renderDoorPngPhp(array $opts): array {
         ];
     }
 
-    // 2. Photorealistic PHP GD Real-Photo Compositor using the actual selected catalog images
-    $w = 600;
-    $h = 800;
-    if (!empty($refDesigns) && function_exists('imagecreatetruecolor') && function_exists('imagecreatefromstring')) {
-        $loadedImgs = [];
-        $boundsById = [];
+    // 2. Zero-Crop High-Clarity PHP GD Real-Photo Compositor
+    $canvasW = 720;
+    $canvasH = 960;
+    $canvasBg = [255.0, 255.0, 255.0];
 
+    if (!empty($refDesigns) && function_exists('imagecreatetruecolor') && function_exists('imagecreatefromstring')) {
+        $objs = [];
         foreach ($refDesigns as $d) {
             $did = (int)($d['id'] ?? 0);
             $rel = (string)($d['image_url'] ?? '');
             if ($rel !== '') {
                 $abs = $uploadsRoot . DIRECTORY_SEPARATOR . ltrim(str_replace('/', DIRECTORY_SEPARATOR, $rel), '/\\');
-                $gd = loadNormalizedDoorImage($abs, $w, $h);
-                if ($gd) {
-                    $loadedImgs[$did] = $gd;
-                    $boundsById[$did] = detectDoorBounds($gd);
+                $extracted = extractDoorObject($abs, $d);
+                if ($extracted !== null) {
+                    $objs[$did] = $extracted;
                 }
             }
         }
 
-        if (!empty($loadedImgs)) {
-            $ids = array_keys($loadedImgs);
+        if (!empty($objs)) {
+            $ids = array_keys($objs);
             $elementMap = [];
             foreach ($refElements as $el) {
                 $did = (int)($el['design_id'] ?? 0);
                 $elName = strtolower(trim((string)($el['element'] ?? '')));
-                if (isset($loadedImgs[$did]) && $elName !== '') {
+                if (isset($objs[$did]) && $elName !== '') {
                     $elementMap[$elName] = $did;
                 }
             }
@@ -673,179 +949,266 @@ function renderDoorPngPhp(array $opts): array {
             $centerId = $findByKeyword(['center', 'carving', 'medallion', 'bell']);
             $finishId = $findByKeyword(['polish', 'finish', 'border']);
 
-            // Choose the BASE canvas cleanly so Frame Style (side pillars) NEVER leaks Top Arch & Crown!
-            // Priority for base canvas:
-            //  1) If a design is assigned Center Carving or Panel Layout, use it as base (so its top crown stays intact
-            //     unless another design is explicitly assigned Top Arch & Crown!)
-            //  2) Otherwise fall back to Frame Style, Crown, or first selected design.
-            $baseId = $centerId ?? $panelId ?? $frameId ?? $crownId ?? $ids[0];
+            // Architectural base selection:
+            // Frame Style is ALWAYS the outer structure; otherwise prefer a framed design,
+            // then Panel Layout / Center Carving / Crown / first selected design.
+            $baseId = $frameId;
+            if ($baseId === null && $panelId !== null && $objs[$panelId]['is_framed']) {
+                $baseId = $panelId;
+            }
+            if ($baseId === null && $crownId !== null && $objs[$crownId]['is_framed']) {
+                $baseId = $crownId;
+            }
+            if ($baseId === null && $centerId !== null && $objs[$centerId]['is_framed']) {
+                $baseId = $centerId;
+            }
+            if ($baseId === null) {
+                $baseId = $panelId ?? $centerId ?? $crownId ?? $ids[0];
+            }
 
-            // Start canvas with the chosen base photo
-            $canvas = imagecreatetruecolor($w, $h);
-            imagecopy($canvas, $loadedImgs[$baseId], 0, 0, 0, 0, $w, $h);
-            $baseBounds = $boundsById[$baseId];
-            $baseOuter = $baseBounds['outer'];
-            $baseInner = $baseBounds['inner'];
-            $baseWall  = $baseBounds['wall'];
+            $base = $objs[$baseId];
 
-            // Sample target wood color from the base door
+            // Determine whether a separate Top Arch & Crown will be mounted atop the base
+            $hasSeparateCrown = ($crownId !== null && $crownId !== $baseId && isset($objs[$crownId]));
+            $crownAddsTopHeight = $hasSeparateCrown && !$base['is_framed'];
+
+            // Safe generous margins so 100% of the door & crown are visible (ZERO clipping!)
+            $padX = 48;
+            $padBottom = 46;
+            $padTop = $crownAddsTopHeight ? 175 : 54;
+
+            $availW = $canvasW - $padX * 2;
+            $availH = $canvasH - $padTop - $padBottom;
+
+            // Uniform contain-fit scale (NEVER stretches, NEVER cover-crops!)
+            $scale = min($availW / max(1.0, (float)$base['w']), $availH / max(1.0, (float)$base['h']));
+            $dstBaseW = max(40, (int)round($base['w'] * $scale));
+            $dstBaseH = max(40, (int)round($base['h'] * $scale));
+            $dstBaseX = (int)round(($canvasW - $dstBaseW) / 2.0);
+            // Sit nicely anchored near bottom margin when adding an overhead crown, else centered vertically
+            $dstBaseY = $crownAddsTopHeight
+                ? ($canvasH - $padBottom - $dstBaseH)
+                : ($padTop + (int)round(($availH - $dstBaseH) / 2.0));
+
+            // Create pure crisp white studio canvas
+            $canvas = imagecreatetruecolor($canvasW, $canvasH);
+            $bgCol = imagecolorallocate($canvas, (int)$canvasBg[0], (int)$canvasBg[1], (int)$canvasBg[2]);
+            imagefilledrectangle($canvas, 0, 0, $canvasW, $canvasH, $bgCol);
+
+            // Place the full, uncropped base door cleanly onto the studio canvas
+            blitCleanObjectToCanvas($canvas, $base, $dstBaseX, $dstBaseY, $dstBaseW, $dstBaseH, $canvasBg);
+
+            // Map base's coordinates onto canvas coordinates
+            $mapRect = function (array $r) use ($dstBaseX, $dstBaseY, $scale): array {
+                return [
+                    'x' => $dstBaseX + (int)round($r['x'] * $scale),
+                    'y' => $dstBaseY + (int)round($r['y'] * $scale),
+                    'w' => max(20, (int)round($r['w'] * $scale)),
+                    'h' => max(20, (int)round($r['h'] * $scale)),
+                ];
+            };
+
+            $baseOuter = ['x' => $dstBaseX, 'y' => $dstBaseY, 'w' => $dstBaseW, 'h' => $dstBaseH];
+            $baseInner = $mapRect($base['inner']);
+            $baseLintelY = $dstBaseY + (int)round($base['crown_bottom_y'] * $scale);
+            $baseMidLeftX = $dstBaseX + (int)round($base['mid_left'] * $scale);
+            $baseMidRightX = $dstBaseX + (int)round($base['mid_right'] * $scale);
+            $baseMidW = max(60, $baseMidRightX - $baseMidLeftX);
+
+            // Sample target wood tone from the base door
             $baseWoodRgb = sampleAverageWoodColor(
                 $canvas,
                 $baseOuter['x'],
                 $baseOuter['y'],
                 $baseOuter['w'],
-                max(60, (int)round($baseOuter['h'] * 0.35)),
-                $baseWall
+                $baseOuter['h'],
+                $canvasBg
             );
 
-            // 1) Frame Style (Left & Right carved side pillars + outer vertical frame ONLY — keeps top crown untouched!)
-            if ($frameId !== null && $frameId !== $baseId && isset($loadedImgs[$frameId])) {
-                $fBounds = $boundsById[$frameId];
-                $fOuter = $fBounds['outer'];
-                $fInner = $fBounds['inner'];
-
-                $srcPillarTop = max($fOuter['y'], $fInner['y'] - 20);
-                $srcPillarBot = min($fOuter['y'] + $fOuter['h'], $fInner['y'] + $fInner['h'] + 22);
-                $srcPillarH   = max(100, $srcPillarBot - $srcPillarTop);
-
-                $dstPillarTop = max($baseOuter['y'], $baseInner['y'] - 20);
-                $dstPillarBot = min($baseOuter['y'] + $baseOuter['h'], $baseInner['y'] + $baseInner['h'] + 20);
-                $dstPillarH   = max(100, $dstPillarBot - $dstPillarTop);
-
-                // Left pillar strip (inset 4px from outer wall edge so no wall sliver carries over)
-                $srcLeftPillar = [
-                    'x' => $fOuter['x'] + 4,
-                    'y' => $srcPillarTop,
-                    'w' => max(28, $fInner['x'] - $fOuter['x'] - 4),
-                    'h' => $srcPillarH,
-                ];
-                $dstLeftPillar = [
-                    'x' => $baseOuter['x'] + 2,
-                    'y' => $dstPillarTop,
-                    'w' => max(28, $baseInner['x'] - $baseOuter['x'] - 2),
-                    'h' => $dstPillarH,
-                ];
-                compositeRegionMatched($canvas, $loadedImgs[$frameId], $srcLeftPillar, $dstLeftPillar, $baseWoodRgb, 8, false, false, $fBounds['wall']);
-
-                // Right pillar strip (inset 6px from outer wall edge so no wall sliver carries over)
-                $fInnerRight = $fInner['x'] + $fInner['w'];
-                $bInnerRight = $baseInner['x'] + $baseInner['w'];
-                $srcRightPillar = [
-                    'x' => $fInnerRight,
-                    'y' => $srcPillarTop,
-                    'w' => max(28, ($fOuter['x'] + $fOuter['w']) - $fInnerRight - 6),
-                    'h' => $srcPillarH,
-                ];
-                $dstRightPillar = [
-                    'x' => $bInnerRight,
-                    'y' => $dstPillarTop,
-                    'w' => max(28, ($baseOuter['x'] + $baseOuter['w']) - $bInnerRight - 4),
-                    'h' => $dstPillarH,
-                ];
-                compositeRegionMatched($canvas, $loadedImgs[$frameId], $srcRightPillar, $dstRightPillar, $baseWoodRgb, 8, false, false, $fBounds['wall']);
-            }
-
-            // 2) Top Arch & Crown ONLY (cleanly replaces top arch/cornice while erasing old cornice corners!)
-            if ($crownId !== null && $crownId !== $baseId && isset($loadedImgs[$crownId])) {
-                $cBounds = $boundsById[$crownId];
-                $cOuter = $cBounds['outer'];
-                $cInner = $cBounds['inner'];
-                $srcCrownH = max(90, ($cInner['y'] - $cOuter['y']) + 6);
-                $dstCrownH = max(90, ($baseInner['y'] - $baseOuter['y']) + 6);
-                $srcCrown = [
-                    'x' => $cOuter['x'],
-                    'y' => max(0, $cOuter['y'] - 8),
-                    'w' => max(80, $cOuter['w'] - 4),
-                    'h' => $srcCrownH + 8,
-                ];
-                // Erase wider old cornice wings using clean wall directly below the cornice at each exact X column!
-                $clearLeft = max(0, $baseOuter['x'] - 56);
-                $clearRight = min($w - 1, $baseOuter['x'] + $baseOuter['w'] + 56);
-                $clearBot = $baseInner['y'] - 4;
-                $sampleWallY = min($h - 10, $baseInner['y'] + 45);
-                for ($cx = $clearLeft; $cx <= $clearRight; $cx++) {
-                    if ($cx >= $baseOuter['x'] && $cx <= $baseOuter['x'] + $baseOuter['w']) continue;
-                    // Sample clean wall vertically aligned at ($cx, $sampleWallY) & ($cx, 12)
-                    $bRgb = imagecolorat($canvas, $cx, $sampleWallY);
-                    $br = ($bRgb >> 16) & 255; $bg = ($bRgb >> 8) & 255; $bb = $bRgb & 255;
-                    $tRgb = imagecolorat($canvas, $cx, 12);
-                    $tr = ($tRgb >> 16) & 255; $tg = ($tRgb >> 8) & 255; $tb = $tRgb & 255;
-                    if (colorDist($br, $bg, $bb, $baseWall) > 65.0) { $br = $tr; $bg = $tg; $bb = $tb; }
-                    for ($cy = 14; $cy < $clearBot; $cy++) {
-                        $t = ($cy - 14) / (float)max(1, $clearBot - 14);
-                        $wr = clampByte($tr * (1.0 - $t) + $br * $t);
-                        $wg = clampByte($tg * (1.0 - $t) + $bg * $t);
-                        $wb = clampByte($tb * (1.0 - $t) + $bb * $t);
-                        imagesetpixel($canvas, $cx, $cy, ($wr << 16) | ($wg << 8) | $wb);
-                    }
+            // Helper: choose source carving/shutter rect cleanly (NEVER slices single-leaf carvings in half!)
+            $getCleanShutterRect = function (int $srcId) use ($objs, $base): array {
+                $src = $objs[$srcId];
+                // If both base and source are pure shutters (no pillars), nest source's inner carved panel
+                // inside base's outer stiles/rails so borders don't double up!
+                if (!$base['is_framed'] && !$src['is_framed']) {
+                    return $src['inner'];
                 }
-                $dstCrownFit = [
-                    'x' => max(0, $baseOuter['x'] - 2),
-                    'y' => max(0, $baseOuter['y'] - 8),
-                    'w' => min($w - max(0, $baseOuter['x'] - 2), $baseOuter['w'] + 4),
-                    'h' => $dstCrownH + 8,
-                ];
-                compositeRegionMatched($canvas, $loadedImgs[$crownId], $srcCrown, $dstCrownFit, $baseWoodRgb, 18, false, true, $cBounds['wall'], $baseWall);
-            }
-
-            // Helper to extract Single Leaf vs Double Leaf inner region cleanly without side pillars or floor
-            $getLeavesSourceRect = function (int $srcId) use ($boundsById, $leafType): array {
-                $lv = $boundsById[$srcId]['leaves'];
-                if ($leafType === 'Single Leaf') {
-                    return [
-                        'x' => $lv['x'] + (int)round($lv['w'] * 0.03),
-                        'y' => $lv['y'],
-                        'w' => (int)round($lv['w'] * 0.46),
-                        'h' => $lv['h'],
-                    ];
-                }
-                return $lv;
+                // Otherwise use the COMPLETE intact shutter leaf (96% of pure shutter, or inner leaf of framed door)
+                return $src['leaf'];
             };
 
-            // 3) Panel Layout (Full inner double-leaf shutter opening)
-            if ($panelId !== null && $panelId !== $baseId && isset($loadedImgs[$panelId])) {
-                $srcPanel = $getLeavesSourceRect($panelId);
-                compositeRegionMatched($canvas, $loadedImgs[$panelId], $srcPanel, $baseInner, $baseWoodRgb, 12, true, false, $boundsById[$panelId]['wall']);
+            // A) Panel Layout — fits cleanly inside the base doorway opening
+            if ($panelId !== null && $panelId !== $baseId && isset($objs[$panelId]) && !$base['is_landscape']) {
+                $srcObj = $objs[$panelId];
+                $srcPanel = $getCleanShutterRect($panelId);
+                compositeRegionClean(
+                    $canvas,
+                    $srcObj['img'],
+                    $srcPanel,
+                    $baseInner,
+                    $baseWoodRgb,
+                    7,
+                    true,
+                    false,
+                    $srcObj['has_clean_bg'],
+                    $srcObj['bg'],
+                    false
+                );
             }
 
-            // 4) Center Carving (Inner door carving leaves or center medallion overlay if Panel Layout also replaced)
-            if ($centerId !== null && $centerId !== $baseId && isset($loadedImgs[$centerId])) {
-                if ($panelId === null || $panelId === $baseId) {
-                    $srcInner = $getLeavesSourceRect($centerId);
-                    compositeRegionMatched($canvas, $loadedImgs[$centerId], $srcInner, $baseInner, $baseWoodRgb, 12, true, false, $boundsById[$centerId]['wall']);
+            // B) Center Carving — fills doorway opening cleanly (or soft-blends into center if Panel Layout also set)
+            if ($centerId !== null && $centerId !== $baseId && isset($objs[$centerId]) && !$base['is_landscape']) {
+                $srcObj = $objs[$centerId];
+                if ($panelId === null || $panelId === $baseId || $panelId === $centerId) {
+                    $srcInner = $getCleanShutterRect($centerId);
+                    compositeRegionClean(
+                        $canvas,
+                        $srcObj['img'],
+                        $srcInner,
+                        $baseInner,
+                        $baseWoodRgb,
+                        7,
+                        true,
+                        false,
+                        $srcObj['has_clean_bg'],
+                        $srcObj['bg'],
+                        false
+                    );
                 } else {
-                    $cLv = $boundsById[$centerId]['leaves'];
+                    // Both Panel Layout & Center Carving from two different designs:
+                    // Blend center carving cleanly into the heart of the door leaf with soft rounded mask
+                    $cLeaf = $srcObj['leaf'];
                     $srcMid = [
-                        'x' => $cLv['x'] + (int)round($cLv['w'] * 0.06),
-                        'y' => $cLv['y'] + (int)round($cLv['h'] * 0.08),
-                        'w' => (int)round($cLv['w'] * 0.88),
-                        'h' => (int)round($cLv['h'] * 0.72),
+                        'x' => $cLeaf['x'] + (int)round($cLeaf['w'] * 0.08),
+                        'y' => $cLeaf['y'] + (int)round($cLeaf['h'] * 0.10),
+                        'w' => max(40, (int)round($cLeaf['w'] * 0.84)),
+                        'h' => max(60, (int)round($cLeaf['h'] * 0.80)),
                     ];
                     $dstMid = [
-                        'x' => $baseInner['x'] + (int)round($baseInner['w'] * 0.06),
-                        'y' => $baseInner['y'] + (int)round($baseInner['h'] * 0.08),
-                        'w' => (int)round($baseInner['w'] * 0.88),
-                        'h' => (int)round($baseInner['h'] * 0.72),
+                        'x' => $baseInner['x'] + (int)round($baseInner['w'] * 0.10),
+                        'y' => $baseInner['y'] + (int)round($baseInner['h'] * 0.10),
+                        'w' => max(40, (int)round($baseInner['w'] * 0.80)),
+                        'h' => max(60, (int)round($baseInner['h'] * 0.80)),
                     ];
-                    compositeRegionMatched($canvas, $loadedImgs[$centerId], $srcMid, $dstMid, $baseWoodRgb, 20, false, false, $boundsById[$centerId]['wall']);
+                    compositeRegionClean(
+                        $canvas,
+                        $srcObj['img'],
+                        $srcMid,
+                        $dstMid,
+                        $baseWoodRgb,
+                        18,
+                        false,
+                        false,
+                        $srcObj['has_clean_bg'],
+                        $srcObj['bg'],
+                        true
+                    );
                 }
             }
 
-            // Sample Border/Polish Finish wood color if assigned to a design
-            $finishWoodRgb = null;
-            if ($finishId !== null && isset($loadedImgs[$finishId])) {
-                $fBounds = $boundsById[$finishId];
-                $fOut = $fBounds['outer'];
-                $finishWoodRgb = sampleAverageWoodColor($loadedImgs[$finishId], $fOut['x'], $fOut['y'], $fOut['w'], $fOut['h'], $fBounds['wall']);
+            // C) Top Arch & Crown — cleanly replaces old crown or mounts flush atop unframed door, NEVER cut off!
+            $finalTopY = $baseOuter['y'];
+            $finalLeftX = $baseOuter['x'];
+            $finalRightX = $baseOuter['x'] + $baseOuter['w'];
+
+            if ($hasSeparateCrown && !$base['is_landscape']) {
+                $cObj = $objs[$crownId];
+                $srcCrownH = max(50, (int)round($cObj['crown_bottom_y'] * 1.04));
+                $srcCrownH = min($cObj['h'], $srcCrownH);
+                $srcCrown = [
+                    'x' => 0,
+                    'y' => 0,
+                    'w' => $cObj['w'],
+                    'h' => $srcCrownH,
+                ];
+
+                // Crown target width matches base's pillars/door width with subtle royal overhang (clamped safely inside canvas)
+                $crownOverhang = $cObj['has_flared_crown'] ? 1.06 : 1.03;
+                $targetCrownW = min($canvasW - 44, (int)round($baseMidW * $crownOverhang));
+                $crownNaturalH = (int)round($targetCrownW * ($srcCrownH / max(1.0, (float)$cObj['w'])));
+
+                if ($base['is_framed']) {
+                    // Erase the base's existing crown cleanly above the lintel line so no old cornice peeks out
+                    imagefilledrectangle($canvas, 0, 0, $canvasW - 1, max(0, $baseLintelY - 2), $bgCol);
+
+                    // Fit crown height cleanly within [24 .. baseLintelY + overlap] so the crown tip is NEVER clipped!
+                    $overlap = 10;
+                    $maxCrownH = max(60, ($baseLintelY + $overlap) - 24);
+                    $targetCrownH = min($maxCrownH, max(72, $crownNaturalH));
+                    if ($crownNaturalH > $maxCrownH) {
+                        // Scale width slightly to preserve crown proportions without squashing or clipping
+                        $ratio = $maxCrownH / (float)$crownNaturalH;
+                        $targetCrownW = max((int)round($baseMidW * 0.98), (int)round($targetCrownW * max(0.85, $ratio)));
+                    }
+                    $dstCrownX = (int)round(($baseMidLeftX + $baseMidRightX - $targetCrownW) / 2.0);
+                    $dstCrownX = max(20, min($canvasW - 20 - $targetCrownW, $dstCrownX));
+                    $dstCrownY = max(20, ($baseLintelY + $overlap) - $targetCrownH);
+                } else {
+                    // Mounting a crown directly on top of a pure door shutter
+                    $overlap = 10;
+                    $maxCrownH = max(60, ($dstBaseY + $overlap) - 24);
+                    $targetCrownH = min($maxCrownH, max(72, $crownNaturalH));
+                    $dstCrownX = (int)round(($dstBaseX + ($dstBaseW / 2.0)) - ($targetCrownW / 2.0));
+                    $dstCrownX = max(20, min($canvasW - 20 - $targetCrownW, $dstCrownX));
+                    $dstCrownY = max(20, ($dstBaseY + $overlap) - $targetCrownH);
+                }
+
+                $dstCrown = [
+                    'x' => $dstCrownX,
+                    'y' => $dstCrownY,
+                    'w' => $targetCrownW,
+                    'h' => $targetCrownH,
+                ];
+
+                compositeRegionClean(
+                    $canvas,
+                    $cObj['img'],
+                    $srcCrown,
+                    $dstCrown,
+                    $baseWoodRgb,
+                    12,
+                    false,
+                    true,
+                    $cObj['has_clean_bg'],
+                    $cObj['bg'],
+                    false
+                );
+
+                $finalTopY = min($finalTopY, $dstCrownY);
+                $finalLeftX = min($finalLeftX, $dstCrownX);
+                $finalRightX = max($finalRightX, $dstCrownX + $targetCrownW);
             }
 
-            // Apply smooth, speckle-free polish shade grading ONLY to the wooden door silhouette
-            applyPolishShadeGrading($canvas, $polishShade, $baseOuter, $baseWall, $finishWoodRgb);
+            // D) Sample Border/Polish Finish wood color if assigned to a separate design
+            $finishWoodRgb = null;
+            if ($finishId !== null && isset($objs[$finishId])) {
+                $fObj = $objs[$finishId];
+                $finishWoodRgb = sampleAverageWoodColor(
+                    $fObj['img'],
+                    0,
+                    0,
+                    $fObj['w'],
+                    $fObj['h'],
+                    $fObj['has_clean_bg'] ? $fObj['bg'] : null
+                );
+            }
+
+            // E) Apply smooth speckle-free polish grading ONLY to wooden pixels
+            $gradeBounds = [
+                'x' => $finalLeftX,
+                'y' => $finalTopY,
+                'w' => max(40, $finalRightX - $finalLeftX),
+                'h' => max(40, ($baseOuter['y'] + $baseOuter['h']) - $finalTopY),
+            ];
+            applyPolishShadeGrading($canvas, $polishShade, $gradeBounds, $canvasBg, $finishWoodRgb);
+
+            // F) Subtle studio floor contact shadow directly under the door base
+            drawStudioFloorShadow($canvas, $baseMidLeftX, $baseMidRightX, $baseOuter['y'] + $baseOuter['h']);
 
             imagepng($canvas, $fullPath, 6);
             imagedestroy($canvas);
-            foreach ($loadedImgs as $res) {
-                imagedestroy($res);
+            foreach ($objs as $o) {
+                imagedestroy($o['img']);
             }
 
             return [
@@ -867,7 +1230,7 @@ function renderDoorPngPhp(array $opts): array {
 
     if (function_exists('imagecreatetruecolor')) {
         $im = imagecreatetruecolor($fw, $fh);
-        $bg = imagecolorallocate($im, 242, 237, 230);
+        $bg = imagecolorallocate($im, 250, 248, 244);
         imagefilledrectangle($im, 0, 0, $fw, $fh, $bg);
 
         $frameCol = imagecolorallocate($im, clampByte($r * 0.72), clampByte($g * 0.72), clampByte($b * 0.72));

@@ -66,19 +66,39 @@ class _CustomerOrdersTabState extends State<CustomerOrdersTab> {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: Container(
-                        width: 76,
-                        height: 112,
-                        color: AppTheme.bg,
-                        child: (order['ai_output_image_url'] ?? '').toString().isNotEmpty
-                            ? Image.network(
-                                ApiService.instance.mediaUrl(order['ai_output_image_url'].toString()),
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => const Icon(Icons.door_front_door_rounded, size: 38),
-                              )
-                            : const Icon(Icons.door_front_door_rounded, size: 38),
+                    MouseRegion(
+                      cursor: (order['ai_output_image_url'] ?? '').toString().isNotEmpty
+                          ? SystemMouseCursors.click
+                          : MouseCursor.defer,
+                      child: GestureDetector(
+                        onTap: (order['ai_output_image_url'] ?? '').toString().isNotEmpty
+                            ? () => UiKit.showFullImagePopup(
+                                  ctx,
+                                  imageUrl: ApiService.instance.mediaUrl(order['ai_output_image_url'].toString()),
+                                  title: '${order['job_id']} • ${order['woodwork_category']}',
+                                  subtitle: '${order['wood_species']} • ${order['width_inches']}"×${order['height_inches']}"',
+                                )
+                            : null,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            width: 78,
+                            height: 112,
+                            padding: const EdgeInsets.all(3),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: AppTheme.border),
+                            ),
+                            child: (order['ai_output_image_url'] ?? '').toString().isNotEmpty
+                                ? Image.network(
+                                    ApiService.instance.mediaUrl(order['ai_output_image_url'].toString()),
+                                    fit: BoxFit.contain,
+                                    errorBuilder: (_, __, ___) => const Icon(Icons.door_front_door_rounded, size: 38),
+                                  )
+                                : const Icon(Icons.door_front_door_rounded, size: 38),
+                          ),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 14),
@@ -253,11 +273,12 @@ class _CustomerOrdersTabState extends State<CustomerOrdersTab> {
                                         child: Container(
                                           width: 58,
                                           height: 82,
-                                          color: AppTheme.bg,
+                                          padding: const EdgeInsets.all(3),
+                                          color: Colors.white,
                                           child: (o['ai_output_image_url'] ?? '').toString().isNotEmpty
                                               ? Image.network(
                                                   ApiService.instance.mediaUrl(o['ai_output_image_url'].toString()),
-                                                  fit: BoxFit.cover,
+                                                  fit: BoxFit.contain,
                                                   errorBuilder: (_, __, ___) =>
                                                       const Icon(Icons.door_front_door_rounded, size: 32, color: AppTheme.woodPrimary),
                                                 )

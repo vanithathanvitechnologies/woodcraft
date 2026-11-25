@@ -199,11 +199,12 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
                         child: Container(
                           width: 48,
                           height: 66,
-                          color: AppTheme.bg,
+                          padding: const EdgeInsets.all(2),
+                          color: Colors.white,
                           child: (o['ai_output_image_url'] ?? '').toString().isNotEmpty
                               ? Image.network(
                                   ApiService.instance.mediaUrl(o['ai_output_image_url'].toString()),
-                                  fit: BoxFit.cover,
+                                  fit: BoxFit.contain,
                                   errorBuilder: (_, __, ___) =>
                                       const Icon(Icons.door_front_door_rounded, color: AppTheme.woodPrimary),
                                 )

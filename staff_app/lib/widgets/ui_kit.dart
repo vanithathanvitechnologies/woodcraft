@@ -174,4 +174,171 @@ class UiKit {
       child: child,
     );
   }
+
+  /// Opens a responsive full-size interactive zoom image popup (zero cropping).
+  static void showFullImagePopup(
+    BuildContext context, {
+    required String imageUrl,
+    String? title,
+    String? subtitle,
+    String? priceText,
+    String? badge,
+  }) {
+    if (imageUrl.isEmpty) return;
+    final size = MediaQuery.sizeOf(context);
+    final maxW = (size.width * 0.94).clamp(280.0, 960.0);
+    final maxH = (size.height * 0.90).clamp(320.0, 920.0);
+    final hasFooter = (title != null && title.isNotEmpty) ||
+        (subtitle != null && subtitle.isNotEmpty) ||
+        (priceText != null && priceText.isNotEmpty);
+
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.86),
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxW, maxHeight: maxH),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.35),
+                  blurRadius: 28,
+                  offset: const Offset(0, 12),
+                ),
+              ],
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              mainAxisSize: MainAxisSize.max,
+              children: [
+                Expanded(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Container(
+                        color: Colors.white,
+                        padding: const EdgeInsets.all(14),
+                        child: InteractiveViewer(
+                          minScale: 0.8,
+                          maxScale: 5.0,
+                          child: Center(
+                            child: Image.network(
+                              imageUrl,
+                              fit: BoxFit.contain,
+                              filterQuality: FilterQuality.high,
+                              loadingBuilder: (context, child, progress) {
+                                if (progress == null) return child;
+                                return const Center(child: CircularProgressIndicator());
+                              },
+                              errorBuilder: (_, __, ___) => const Center(
+                                child: Icon(
+                                  Icons.broken_image_outlined,
+                                  size: 56,
+                                  color: AppTheme.textMuted,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (badge != null && badge.isNotEmpty)
+                        Positioned(
+                          top: 12,
+                          left: 12,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: AppTheme.brass,
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Text(
+                              badge,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                      Positioned(
+                        top: 10,
+                        right: 10,
+                        child: IconButton.filled(
+                          style: IconButton.styleFrom(
+                            backgroundColor: Colors.black.withValues(alpha: 0.65),
+                            foregroundColor: Colors.white,
+                          ),
+                          tooltip: 'Close',
+                          onPressed: () => Navigator.pop(ctx),
+                          icon: const Icon(Icons.close_rounded, size: 22),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (hasFooter)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+                    decoration: const BoxDecoration(
+                      color: AppTheme.bg,
+                      border: Border(top: BorderSide(color: AppTheme.border)),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (title != null && title.isNotEmpty)
+                                Text(
+                                  title,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 14.5,
+                                    color: AppTheme.woodDark,
+                                  ),
+                                ),
+                              if (subtitle != null && subtitle.isNotEmpty) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  subtitle,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        if (priceText != null && priceText.isNotEmpty) ...[
+                          const SizedBox(width: 12),
+                          Text(
+                            priceText,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w900,
+                              fontSize: 16,
+                              color: AppTheme.woodPrimary,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

@@ -468,12 +468,13 @@ tr:hover td {
 }
 
 .thumb {
-  width: 44px;
-  height: 60px;
-  object-fit: cover;
+  width: 46px;
+  height: 62px;
+  object-fit: contain;
+  padding: 2px;
   border-radius: 6px;
   border: 1px solid var(--border);
-  background: #f5f0e8;
+  background: #ffffff;
 }
 
 @media (max-width: 820px) {

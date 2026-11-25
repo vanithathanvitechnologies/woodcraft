@@ -4,6 +4,7 @@ import '../../core/app_theme.dart';
 import '../../core/constants.dart';
 import '../../services/api_service.dart';
 import '../../services/pdf_service.dart';
+import '../../widgets/ui_kit.dart';
 
 class AiCombinerTab extends StatefulWidget {
   const AiCombinerTab({super.key});
@@ -405,10 +406,34 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
                                   child: Stack(
                                     fit: StackFit.expand,
                                     children: [
-                                      Image.network(
-                                        ApiService.instance.mediaUrl(d['image_url']?.toString()),
-                                        fit: BoxFit.cover,
-                                        errorBuilder: (_, __, ___) => const Icon(Icons.door_front_door),
+                                      Container(
+                                        color: Colors.white,
+                                        padding: const EdgeInsets.all(4),
+                                        child: Image.network(
+                                          ApiService.instance.mediaUrl(d['image_url']?.toString()),
+                                          fit: BoxFit.contain,
+                                          errorBuilder: (_, __, ___) => const Icon(Icons.door_front_door),
+                                        ),
+                                      ),
+                                      Positioned(
+                                        top: 4,
+                                        left: 4,
+                                        child: GestureDetector(
+                                          onTap: () => UiKit.showFullImagePopup(
+                                            context,
+                                            imageUrl: ApiService.instance.mediaUrl(d['image_url']?.toString()),
+                                            title: '${d['title'] ?? ''}',
+                                            subtitle: '${d['wood_species'] ?? ''} • ${d['category'] ?? ''}',
+                                          ),
+                                          child: Container(
+                                            padding: const EdgeInsets.all(4),
+                                            decoration: BoxDecoration(
+                                              color: Colors.black.withValues(alpha: 0.55),
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: const Icon(Icons.zoom_in_rounded, size: 13, color: Colors.white),
+                                          ),
+                                        ),
                                       ),
                                       if (selected)
                                         const Positioned(
@@ -616,16 +641,55 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('3. AI Generated Design Preview',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.woodDark)),
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          '3. AI Generated Design Preview',
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.woodDark),
+                        ),
+                      ),
+                      UiKit.iconChip(Icons.zoom_in_rounded, 'Tap for Full Size', color: AppTheme.info),
+                    ],
+                  ),
                   const SizedBox(height: 10),
-                  Center(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: Image.network(
-                        ApiService.instance.mediaUrl(_aiImageUrl),
-                        height: 300,
-                        fit: BoxFit.contain,
+                  MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: GestureDetector(
+                      onTap: () => UiKit.showFullImagePopup(
+                        context,
+                        imageUrl: ApiService.instance.mediaUrl(_aiImageUrl),
+                        title: 'AI Generated $_category Design',
+                        subtitle: '$_woodSpecies • $_polishShade • $_leafType',
+                        badge: 'AI PREVIEW',
+                      ),
+                      child: Container(
+                        width: double.infinity,
+                        constraints: const BoxConstraints(minHeight: 280, maxHeight: 420),
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: AppTheme.border),
+                        ),
+                        child: Image.network(
+                          ApiService.instance.mediaUrl(_aiImageUrl),
+                          fit: BoxFit.contain,
+                          filterQuality: FilterQuality.high,
+                          loadingBuilder: (context, child, progress) {
+                            if (progress == null) return child;
+                            return const SizedBox(
+                              height: 280,
+                              child: Center(child: CircularProgressIndicator()),
+                            );
+                          },
+                          errorBuilder: (_, __, ___) => const SizedBox(
+                            height: 200,
+                            child: Center(
+                              child: Icon(Icons.broken_image_outlined, size: 48, color: AppTheme.textMuted),
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ),

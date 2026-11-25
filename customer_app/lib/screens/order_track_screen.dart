@@ -68,6 +68,84 @@ class _OrderTrackScreenState extends State<OrderTrackScreen> {
     }
   }
 
+  void _openFullImagePopup(String imageUrl, {String? title}) {
+    if (imageUrl.isEmpty) return;
+    final size = MediaQuery.sizeOf(context);
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.86),
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: (size.width * 0.94).clamp(280.0, 960.0),
+            maxHeight: (size.height * 0.90).clamp(320.0, 920.0),
+          ),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                Expanded(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Container(
+                        color: Colors.white,
+                        padding: const EdgeInsets.all(14),
+                        child: InteractiveViewer(
+                          minScale: 0.8,
+                          maxScale: 5.0,
+                          child: Center(
+                            child: Image.network(
+                              imageUrl,
+                              fit: BoxFit.contain,
+                              filterQuality: FilterQuality.high,
+                              errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined, size: 54),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        top: 10,
+                        right: 10,
+                        child: IconButton.filled(
+                          style: IconButton.styleFrom(
+                            backgroundColor: Colors.black.withValues(alpha: 0.65),
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: () => Navigator.pop(ctx),
+                          icon: const Icon(Icons.close_rounded, size: 22),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (title != null && title.isNotEmpty)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: const BoxDecoration(
+                      color: _bg,
+                      border: Border(top: BorderSide(color: _border)),
+                    ),
+                    child: Text(
+                      title,
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: _woodDark),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading || _order == null) {
@@ -153,19 +231,33 @@ class _OrderTrackScreenState extends State<OrderTrackScreen> {
                   ),
                   const SizedBox(height: 14),
                   if (imgUrl.isNotEmpty)
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(16),
-                      child: Container(
-                        width: double.infinity,
-                        color: _bg,
-                        padding: const EdgeInsets.all(10),
-                        child: Image.network(
+                    MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: GestureDetector(
+                        onTap: () => _openFullImagePopup(
                           imgUrl,
-                          height: 250,
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) => const SizedBox(
-                            height: 140,
-                            child: Center(child: Icon(Icons.door_front_door_rounded, size: 60, color: _woodPrimary)),
+                          title: '${o['job_id']} • ${o['woodwork_category']} (${o['wood_species']})',
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: Container(
+                            width: double.infinity,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: _border),
+                            ),
+                            padding: const EdgeInsets.all(10),
+                            child: Image.network(
+                              imgUrl,
+                              height: 300,
+                              fit: BoxFit.contain,
+                              filterQuality: FilterQuality.high,
+                              errorBuilder: (_, __, ___) => const SizedBox(
+                                height: 140,
+                                child: Center(child: Icon(Icons.door_front_door_rounded, size: 60, color: _woodPrimary)),
+                              ),
+                            ),
                           ),
                         ),
                       ),

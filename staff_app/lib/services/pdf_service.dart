@@ -218,8 +218,12 @@ class PdfService {
                     child: pw.Container(
                       width: (contentWidth * 0.78).clamp(110.0, 200.0),
                       height: (contentWidth * 1.04).clamp(150.0, 265.0),
-                      decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey400)),
-                      child: pw.Image(designImg, fit: pw.BoxFit.cover),
+                      padding: const pw.EdgeInsets.all(4),
+                      decoration: pw.BoxDecoration(
+                        color: PdfColors.white,
+                        border: pw.Border.all(color: PdfColors.grey400),
+                      ),
+                      child: pw.Image(designImg, fit: pw.BoxFit.contain),
                     ),
                   ),
                   pw.SizedBox(height: 10),
@@ -236,8 +240,12 @@ class PdfService {
                       pw.Container(
                         width: 170,
                         height: 235,
-                        decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey400)),
-                        child: pw.Image(designImg, fit: pw.BoxFit.cover),
+                        padding: const pw.EdgeInsets.all(4),
+                        decoration: pw.BoxDecoration(
+                          color: PdfColors.white,
+                          border: pw.Border.all(color: PdfColors.grey400),
+                        ),
+                        child: pw.Image(designImg, fit: pw.BoxFit.contain),
                       ),
                     if (designImg != null) pw.SizedBox(width: 16),
                     pw.Expanded(
@@ -435,8 +443,12 @@ class PdfService {
                     child: pw.Container(
                       width: (contentWidth * 0.80).clamp(110.0, 200.0),
                       height: (contentWidth * 1.06).clamp(150.0, 265.0),
-                      decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.black, width: 1.5)),
-                      child: pw.Image(designImg, fit: pw.BoxFit.cover),
+                      padding: const pw.EdgeInsets.all(4),
+                      decoration: pw.BoxDecoration(
+                        color: PdfColors.white,
+                        border: pw.Border.all(color: PdfColors.black, width: 1.5),
+                      ),
+                      child: pw.Image(designImg, fit: pw.BoxFit.contain),
                     ),
                   ),
                   pw.SizedBox(height: 10),
@@ -453,8 +465,12 @@ class PdfService {
                       pw.Container(
                         width: 185,
                         height: 255,
-                        decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.black, width: 1.5)),
-                        child: pw.Image(designImg, fit: pw.BoxFit.cover),
+                        padding: const pw.EdgeInsets.all(4),
+                        decoration: pw.BoxDecoration(
+                          color: PdfColors.white,
+                          border: pw.Border.all(color: PdfColors.black, width: 1.5),
+                        ),
+                        child: pw.Image(designImg, fit: pw.BoxFit.contain),
                       ),
                     if (designImg != null) pw.SizedBox(width: 16),
                     pw.Expanded(
@@ -503,8 +519,12 @@ class PdfService {
                       .map((img) => pw.Container(
                             width: isNarrow ? 64 : 88,
                             height: isNarrow ? 86 : 120,
-                            decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey400)),
-                            child: pw.Image(img, fit: pw.BoxFit.cover),
+                            padding: const pw.EdgeInsets.all(3),
+                            decoration: pw.BoxDecoration(
+                              color: PdfColors.white,
+                              border: pw.Border.all(color: PdfColors.grey400),
+                            ),
+                            child: pw.Image(img, fit: pw.BoxFit.contain),
                           ))
                       .toList(),
                 ),

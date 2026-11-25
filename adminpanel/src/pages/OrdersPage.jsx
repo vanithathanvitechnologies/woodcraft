@@ -20,6 +20,7 @@ export default function OrdersPage() {
   const [error, setError] = useState('');
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [lightboxImage, setLightboxImage] = useState(null);
 
   async function loadOrders() {
     setLoading(true);
@@ -108,7 +109,19 @@ export default function OrdersPage() {
                   <tr key={o.id}>
                     <td>
                       {o.ai_output_image_url ? (
-                        <img className="thumb" src={mediaUrl(o.ai_output_image_url)} alt={o.job_id} />
+                        <img
+                          className="thumb"
+                          src={mediaUrl(o.ai_output_image_url)}
+                          alt={o.job_id}
+                          style={{ cursor: 'zoom-in' }}
+                          title="Click to view full size"
+                          onClick={() =>
+                            setLightboxImage({
+                              url: mediaUrl(o.ai_output_image_url),
+                              title: `${o.job_id} • ${o.woodwork_category}`,
+                            })
+                          }
+                        />
                       ) : (
                         <div className="thumb" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10 }}>N/A</div>
                       )}
@@ -170,7 +183,23 @@ export default function OrdersPage() {
                     <img
                       src={mediaUrl(selectedOrder.ai_output_image_url)}
                       alt={selectedOrder.job_id}
-                      style={{ width: 170, height: 255, objectFit: 'cover', borderRadius: 10, border: '1px solid #e6dfd5' }}
+                      title="Click to view full size"
+                      onClick={() =>
+                        setLightboxImage({
+                          url: mediaUrl(selectedOrder.ai_output_image_url),
+                          title: `${selectedOrder.job_id} • ${selectedOrder.woodwork_category}`,
+                        })
+                      }
+                      style={{
+                        width: 190,
+                        height: 260,
+                        objectFit: 'contain',
+                        background: '#ffffff',
+                        padding: 6,
+                        borderRadius: 10,
+                        border: '1px solid #e6dfd5',
+                        cursor: 'zoom-in',
+                      }}
                     />
                   )}
                   <div style={{ flex: 1, minWidth: 260, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: 13.5 }}>
@@ -238,6 +267,46 @@ export default function OrdersPage() {
                 )}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {lightboxImage && (
+        <div
+          className="modal-backdrop"
+          style={{ zIndex: 1100, background: 'rgba(0, 0, 0, 0.85)' }}
+          onClick={() => setLightboxImage(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#ffffff',
+              borderRadius: 16,
+              padding: 16,
+              maxWidth: '92vw',
+              maxHeight: '92vh',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+              <strong style={{ color: '#3b210e' }}>{lightboxImage.title}</strong>
+              <button className="btn btn-outline btn-sm" onClick={() => setLightboxImage(null)}>
+                Close
+              </button>
+            </div>
+            <img
+              src={lightboxImage.url}
+              alt={lightboxImage.title}
+              style={{
+                maxWidth: '86vw',
+                maxHeight: '80vh',
+                objectFit: 'contain',
+                display: 'block',
+                margin: '0 auto',
+              }}
+            />
           </div>
         </div>
       )}
