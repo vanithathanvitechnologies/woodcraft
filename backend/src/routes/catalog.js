@@ -18,7 +18,7 @@ router.get('/', authenticateToken, requireRoles('admin', 'owner', 'sales'), asyn
       sql += ' AND is_archived = 0';
     }
     if (category && category !== 'All') {
-      sql += ' AND category = ?';
+      sql += ' AND LOWER(TRIM(category)) = LOWER(TRIM(?))';
       params.push(category);
     }
     if (wood_species && wood_species !== 'All') {
@@ -29,9 +29,9 @@ router.get('/', authenticateToken, requireRoles('admin', 'owner', 'sales'), asyn
       sql += ' AND is_trending = 1';
     }
     if (search) {
-      sql += ' AND (title LIKE ? OR carving_style LIKE ? OR tags LIKE ? OR wood_species LIKE ?)';
+      sql += ' AND (title LIKE ? OR carving_style LIKE ? OR tags LIKE ? OR wood_species LIKE ? OR category LIKE ?)';
       const like = `%${search}%`;
-      params.push(like, like, like, like);
+      params.push(like, like, like, like, like);
     }
 
     sql += ' ORDER BY is_trending DESC, created_at DESC';
@@ -43,11 +43,11 @@ router.get('/', authenticateToken, requireRoles('admin', 'owner', 'sales'), asyn
   }
 });
 
-// Upload new design(s) to catalog
+// Upload new design(s) to catalog (Admin / Owner ONLY)
 router.post(
   '/',
   authenticateToken,
-  requireRoles('admin', 'owner', 'sales'),
+  requireRoles('admin', 'owner'),
   catalogUpload.array('images', 5),
   async (req, res) => {
     try {
@@ -63,12 +63,15 @@ router.post(
         image_url,
       } = req.body;
 
-      if (!title) {
+      if (!title || !String(title).trim()) {
         return res.status(400).json({ success: false, message: 'Design title is required' });
       }
 
       const uploadedUrls = (req.files || []).map((f) => `/uploads/catalog/${f.filename}`);
-      const primaryImage = uploadedUrls[0] || image_url || '/uploads/catalog/main-door-1.png';
+      const primaryImage = uploadedUrls[0] || String(image_url || '').trim();
+      if (!primaryImage) {
+        return res.status(400).json({ success: false, message: 'Please upload a design photo' });
+      }
       const extraImages = uploadedUrls.slice(1);
 
       const [result] = await pool.query(
@@ -76,15 +79,15 @@ router.post(
           (title, category, carving_style, wood_species, base_price, image_url, additional_images, tags, description, is_trending, created_by)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          title.trim(),
-          category,
-          carving_style,
-          wood_species,
+          String(title).trim(),
+          String(category || 'Door').trim() || 'Door',
+          String(carving_style || '').trim(),
+          String(wood_species || 'Burma Teak').trim() || 'Burma Teak',
           Number(base_price) || 0,
           primaryImage,
           JSON.stringify(extraImages),
-          tags,
-          description,
+          String(tags || '').trim(),
+          String(description || '').trim(),
           is_trending === 'true' || is_trending === true || Number(is_trending) === 1 ? 1 : 0,
           req.user.id,
         ]
@@ -99,8 +102,7 @@ router.post(
   }
 );
 
-// Update / Edit / Archive / Trending toggle
-router.put('/:id', authenticateToken, requireRoles('admin', 'owner', 'sales'), async (req, res) => {
+async function handleCatalogUpdate(req, res) {
   try {
     const { id } = req.params;
     const allowed = [
@@ -121,12 +123,23 @@ router.put('/:id', authenticateToken, requireRoles('admin', 'owner', 'sales'), a
       if (req.body[key] !== undefined) {
         fields.push(`${key} = ?`);
         if (key === 'is_trending' || key === 'is_archived') {
-          params.push(req.body[key] ? 1 : 0);
+          const v = req.body[key];
+          params.push(v === true || v === 1 || v === '1' || v === 'true' ? 1 : 0);
         } else if (key === 'base_price') {
           params.push(Number(req.body[key]) || 0);
         } else {
-          params.push(req.body[key]);
+          params.push(String(req.body[key]).trim());
         }
+      }
+    }
+
+    const uploadedUrls = (req.files || []).map((f) => `/uploads/catalog/${f.filename}`);
+    if (uploadedUrls.length) {
+      fields.push('image_url = ?');
+      params.push(uploadedUrls[0]);
+      if (uploadedUrls.length > 1) {
+        fields.push('additional_images = ?');
+        params.push(JSON.stringify(uploadedUrls.slice(1)));
       }
     }
 
@@ -142,11 +155,19 @@ router.put('/:id', authenticateToken, requireRoles('admin', 'owner', 'sales'), a
     console.error('Catalog update error:', err);
     res.status(500).json({ success: false, message: 'Failed to update design' });
   }
-});
+}
 
-// Delete design
-router.delete('/:id', authenticateToken, requireRoles('admin', 'owner', 'sales'), async (req, res) => {
+// Update / Edit / Archive / Trending toggle (Admin / Owner ONLY)
+router.put('/:id', authenticateToken, requireRoles('admin', 'owner'), catalogUpload.array('images', 5), handleCatalogUpdate);
+router.post('/:id', authenticateToken, requireRoles('admin', 'owner'), catalogUpload.array('images', 5), handleCatalogUpdate);
+
+// Delete / Archive design (Admin / Owner ONLY)
+router.delete('/:id', authenticateToken, requireRoles('admin', 'owner'), async (req, res) => {
   try {
+    if (req.query.permanent === 'true') {
+      await pool.query('DELETE FROM design_catalog WHERE id = ?', [req.params.id]);
+      return res.json({ success: true, message: 'Design permanently deleted' });
+    }
     await pool.query('UPDATE design_catalog SET is_archived = 1 WHERE id = ?', [req.params.id]);
     res.json({ success: true, message: 'Design archived' });
   } catch (err) {

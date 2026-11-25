@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import '../../core/app_theme.dart';
 import '../../core/constants.dart';
@@ -17,6 +16,7 @@ class _DesignCatalogTabState extends State<DesignCatalogTab> {
   final _searchCtrl = TextEditingController();
   final _inr = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
   String _selectedCategory = 'All';
+  List<String> _categories = List<String>.from(AppConstants.woodworkCategories);
   List<dynamic> _designs = [];
   bool _loading = true;
 
@@ -26,12 +26,55 @@ class _DesignCatalogTabState extends State<DesignCatalogTab> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final res = await ApiService.instance.get('/catalog');
+      final catalogFuture = ApiService.instance.get('/catalog');
+      final categoriesFuture = ApiService.instance
+          .get('/categories')
+          .catchError((_) => <String, dynamic>{});
+
+      final results = await Future.wait([catalogFuture, categoriesFuture]);
       if (!mounted) return;
-      setState(() => _designs = (res['designs'] as List?) ?? []);
+
+      final designs = (results[0]['designs'] as List?) ?? [];
+      final rawCats = (results[1]['categories'] as List?) ?? [];
+      final dynamicCats = rawCats
+          .map((c) => (c is Map ? (c['name'] ?? '') : c).toString().trim())
+          .where((name) => name.isNotEmpty)
+          .toList();
+
+      List<String> mergedCats;
+      if (dynamicCats.isNotEmpty) {
+        mergedCats = dynamicCats;
+      } else {
+        mergedCats = List<String>.from(AppConstants.woodworkCategories);
+        for (final raw in designs) {
+          final cat = ((raw as Map)['category'] ?? '').toString().trim();
+          if (cat.isNotEmpty && !mergedCats.any((e) => e.toLowerCase() == cat.toLowerCase())) {
+            mergedCats.add(cat);
+          }
+        }
+      }
+
+      setState(() {
+        _designs = designs;
+        _categories = mergedCats;
+        if (_selectedCategory != 'All') {
+          final matchedIdx = _categories.indexWhere((c) => c.toLowerCase() == _selectedCategory.toLowerCase());
+          if (matchedIdx >= 0) {
+            _selectedCategory = _categories[matchedIdx];
+          } else {
+            _selectedCategory = 'All';
+          }
+        }
+      });
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -62,132 +105,10 @@ class _DesignCatalogTabState extends State<DesignCatalogTab> {
     }).toList();
   }
 
-  void _showUploadDialog() {
-    final titleCtrl = TextEditingController();
-    final carvingCtrl = TextEditingController();
-    final priceCtrl = TextEditingController(text: '32000');
-    final tagsCtrl = TextEditingController();
-    String category = AppConstants.woodworkCategories.first;
-    String wood = AppConstants.woodSpecies.first;
-    bool trending = false;
-    XFile? pickedFile;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => AlertDialog(
-          title: const Text('Upload Door / Woodwork Design'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: () async {
-                    final picker = ImagePicker();
-                    final img = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
-                    if (img != null) setModalState(() => pickedFile = img);
-                  },
-                  icon: const Icon(Icons.photo_library),
-                  label: Text(pickedFile == null ? 'Pick Design Photo' : 'Selected: ${pickedFile!.name}'),
-                ),
-                const SizedBox(height: 10),
-                TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Design Title *')),
-                const SizedBox(height: 10),
-                DropdownButtonFormField<String>(
-                  initialValue: category,
-                  decoration: const InputDecoration(labelText: 'Woodwork Category'),
-                  items: AppConstants.woodworkCategories
-                      .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                      .toList(),
-                  onChanged: (v) => setModalState(() => category = v ?? category),
-                ),
-                const SizedBox(height: 10),
-                DropdownButtonFormField<String>(
-                  initialValue: wood,
-                  decoration: const InputDecoration(labelText: 'Wood Species'),
-                  items: AppConstants.woodSpecies
-                      .map((w) => DropdownMenuItem(value: w, child: Text(w)))
-                      .toList(),
-                  onChanged: (v) => setModalState(() => wood = v ?? wood),
-                ),
-                const SizedBox(height: 10),
-                TextField(controller: carvingCtrl, decoration: const InputDecoration(labelText: 'Carving Style')),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: priceCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Base Price (₹)'),
-                ),
-                const SizedBox(height: 10),
-                TextField(controller: tagsCtrl, decoration: const InputDecoration(labelText: 'Tags (comma separated)')),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Highlight as Trending'),
-                  value: trending,
-                  onChanged: (v) => setModalState(() => trending = v),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-            ElevatedButton(
-              onPressed: () async {
-                if (titleCtrl.text.trim().isEmpty) return;
-                try {
-                  if (pickedFile != null) {
-                    final bytes = await pickedFile!.readAsBytes();
-                    await ApiService.instance.uploadMultipart(
-                      endpoint: '/catalog',
-                      fileField: 'images',
-                      fileBytes: bytes,
-                      filename: pickedFile!.name,
-                      fields: {
-                        'title': titleCtrl.text.trim(),
-                        'category': category,
-                        'wood_species': wood,
-                        'carving_style': carvingCtrl.text.trim(),
-                        'base_price': priceCtrl.text.trim(),
-                        'tags': tagsCtrl.text.trim(),
-                        'is_trending': trending ? '1' : '0',
-                      },
-                    );
-                  } else {
-                    await ApiService.instance.post('/catalog', {
-                      'title': titleCtrl.text.trim(),
-                      'category': category,
-                      'wood_species': wood,
-                      'carving_style': carvingCtrl.text.trim(),
-                      'base_price': double.tryParse(priceCtrl.text) ?? 25000,
-                      'tags': tagsCtrl.text.trim(),
-                      'is_trending': trending,
-                    });
-                  }
-                  if (ctx.mounted) Navigator.pop(ctx);
-                  _load();
-                } catch (e) {
-                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
-                }
-              },
-              child: const Text('Save Design'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.transparent,
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: AppTheme.woodPrimary,
-        foregroundColor: Colors.white,
-        onPressed: _showUploadDialog,
-        icon: const Icon(Icons.add_photo_alternate),
-        label: const Text('Upload Design'),
-      ),
       body: Column(
         children: [
           Padding(
@@ -220,7 +141,7 @@ class _DesignCatalogTabState extends State<DesignCatalogTab> {
             child: ListView(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 14),
-              children: ['All', ...AppConstants.woodworkCategories].map((c) {
+              children: ['All', ..._categories].map((c) {
                 return Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: ChoiceChip(
@@ -257,7 +178,7 @@ class _DesignCatalogTabState extends State<DesignCatalogTab> {
                         }
                         final cols = constraints.maxWidth > 900 ? 4 : (constraints.maxWidth > 600 ? 3 : 2);
                         return GridView.builder(
-                          padding: const EdgeInsets.fromLTRB(14, 10, 14, 80),
+                          padding: const EdgeInsets.fromLTRB(14, 10, 14, 20),
                           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                             crossAxisCount: cols,
                             mainAxisExtent: 285,

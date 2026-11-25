@@ -17,6 +17,7 @@ class AiCombinerTab extends StatefulWidget {
 class _AiCombinerTabState extends State<AiCombinerTab> {
   final _inr = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
   List<dynamic> _catalog = [];
+  List<String> _categories = List<String>.from(AppConstants.woodworkCategories);
   bool _loadingCatalog = true;
 
   // Selected 1-5 catalog designs + element per design
@@ -64,8 +65,47 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
   Future<void> _loadCatalog() async {
     setState(() => _loadingCatalog = true);
     try {
-      final res = await ApiService.instance.get('/catalog');
-      setState(() => _catalog = (res['designs'] as List?) ?? []);
+      final catalogFuture = ApiService.instance.get('/catalog');
+      final categoriesFuture = ApiService.instance
+          .get('/categories')
+          .catchError((_) => <String, dynamic>{});
+
+      final results = await Future.wait([catalogFuture, categoriesFuture]);
+      if (!mounted) return;
+
+      final designs = (results[0]['designs'] as List?) ?? [];
+      final rawCats = (results[1]['categories'] as List?) ?? [];
+      final dynamicCats = rawCats
+          .map((c) => (c is Map ? (c['name'] ?? '') : c).toString().trim())
+          .where((name) => name.isNotEmpty)
+          .toList();
+
+      List<String> mergedCats;
+      if (dynamicCats.isNotEmpty) {
+        mergedCats = dynamicCats;
+      } else {
+        mergedCats = List<String>.from(AppConstants.woodworkCategories);
+        for (final raw in designs) {
+          final cat = ((raw as Map)['category'] ?? '').toString().trim();
+          if (cat.isNotEmpty && !mergedCats.any((e) => e.toLowerCase() == cat.toLowerCase())) {
+            mergedCats.add(cat);
+          }
+        }
+      }
+
+      setState(() {
+        _catalog = designs;
+        _categories = mergedCats;
+        if (_categories.isNotEmpty) {
+          final matchedIdx = _categories.indexWhere((c) => c.toLowerCase() == _category.toLowerCase());
+          if (matchedIdx >= 0) {
+            _category = _categories[matchedIdx];
+          } else {
+            _category = _categories.first;
+            _selectedElements.clear();
+          }
+        }
+      });
     } catch (_) {} finally {
       if (mounted) setState(() => _loadingCatalog = false);
     }
@@ -461,10 +501,10 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
                   height: 40,
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
-                    itemCount: AppConstants.woodworkCategories.length,
+                    itemCount: _categories.length,
                     separatorBuilder: (_, __) => const SizedBox(width: 8),
                     itemBuilder: (_, idx) {
-                      final cat = AppConstants.woodworkCategories[idx];
+                      final cat = _categories[idx];
                       final isActive = _category == cat;
                       final count = _categoryCount(cat);
                       return ChoiceChip(
@@ -518,7 +558,7 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
                         ),
                         const SizedBox(height: 4),
                         const Text(
-                          'Upload designs for this category in the Catalog tab, then tap Refresh.',
+                          'Ask Admin to upload designs for this category in the Admin Panel, then tap Refresh.',
                           textAlign: TextAlign.center,
                           style: TextStyle(fontSize: 11.5, color: Colors.black54),
                         ),
@@ -733,9 +773,9 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
                   key: ValueKey('cat_$_category'),
-                  initialValue: _category,
+                  initialValue: _categories.contains(_category) ? _category : (_categories.isNotEmpty ? _categories.first : null),
                   decoration: const InputDecoration(labelText: 'Woodwork Type'),
-                  items: AppConstants.woodworkCategories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+                  items: _categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
                   onChanged: (v) {
                     if (v != null) _selectCategory(v);
                   },

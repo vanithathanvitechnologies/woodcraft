@@ -4,6 +4,8 @@ import { clearAuth, getSavedUser, getToken } from './api';
 import Layout from './components/Layout';
 import LoginPage from './pages/LoginPage';
 import ReportsPage from './pages/ReportsPage';
+import CategoriesPage from './pages/CategoriesPage';
+import CatalogPage from './pages/CatalogPage';
 import UsersPage from './pages/UsersPage';
 import CustomersPage from './pages/CustomersPage';
 import OrdersPage from './pages/OrdersPage';
@@ -24,6 +26,8 @@ export default function App() {
     <Layout user={user} onLogout={handleLogout}>
       <Routes>
         <Route path="/" element={<ReportsPage />} />
+        <Route path="/categories" element={<CategoriesPage />} />
+        <Route path="/catalog" element={<CatalogPage />} />
         <Route path="/users" element={<UsersPage />} />
         <Route path="/customers" element={<CustomersPage />} />
         <Route path="/orders" element={<OrdersPage />} />

@@ -1,12 +1,47 @@
 <?php
 require_once __DIR__ . '/../helpers/door_generator.php';
 
+function saveUploadedCatalogImages(array $files): array {
+    $allowedExts = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
+    $targetDir = __DIR__ . '/../uploads/catalog';
+    if (!is_dir($targetDir)) {
+        mkdir($targetDir, 0755, true);
+    }
+
+    $uploadedUrls = [];
+    if (isset($files['name']) && is_array($files['name'])) {
+        for ($i = 0; $i < count($files['name']); $i++) {
+            if (($files['error'][$i] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK) {
+                $ext = strtolower(pathinfo((string)$files['name'][$i], PATHINFO_EXTENSION) ?: 'jpg');
+                if (!in_array($ext, $allowedExts, true)) {
+                    $ext = 'jpg';
+                }
+                $fname = 'catalog-' . time() . '-' . random_int(1000, 9999) . '.' . $ext;
+                if (move_uploaded_file($files['tmp_name'][$i], "$targetDir/$fname")) {
+                    $uploadedUrls[] = "/uploads/catalog/$fname";
+                }
+            }
+        }
+    } elseif (($files['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK) {
+        $ext = strtolower(pathinfo((string)$files['name'], PATHINFO_EXTENSION) ?: 'jpg');
+        if (!in_array($ext, $allowedExts, true)) {
+            $ext = 'jpg';
+        }
+        $fname = 'catalog-' . time() . '-' . random_int(1000, 9999) . '.' . $ext;
+        if (move_uploaded_file($files['tmp_name'], "$targetDir/$fname")) {
+            $uploadedUrls[] = "/uploads/catalog/$fname";
+        }
+    }
+
+    return $uploadedUrls;
+}
+
 function handleCatalogRoutes(string $method, array $segments): void {
-    $authUser = requireRoles(['admin', 'owner', 'sales']);
     $pdo = getDb();
 
-    // POST /api/catalog/ai-combine
+    // POST /api/catalog/ai-combine (Sales, Owner, Admin)
     if ($method === 'POST' && ($segments[0] ?? '') === 'ai-combine') {
+        requireRoles(['admin', 'owner', 'sales']);
         $body = getJsonBody();
         $refIds = $body['reference_design_ids'] ?? [];
         $refElements = $body['reference_elements'] ?? [];
@@ -98,8 +133,9 @@ function handleCatalogRoutes(string $method, array $segments): void {
 
     $id = isset($segments[0]) && is_numeric($segments[0]) ? (int)$segments[0] : null;
 
-    // GET /api/catalog
+    // GET /api/catalog (Sales, Owner, Admin)
     if ($method === 'GET' && $id === null) {
+        requireRoles(['admin', 'owner', 'sales']);
         $sql = 'SELECT * FROM design_catalog WHERE 1=1';
         $params = [];
 
@@ -107,7 +143,7 @@ function handleCatalogRoutes(string $method, array $segments): void {
             $sql .= ' AND is_archived = 0';
         }
         if (!empty($_GET['category']) && $_GET['category'] !== 'All') {
-            $sql .= ' AND category = ?';
+            $sql .= ' AND LOWER(TRIM(category)) = LOWER(TRIM(?))';
             $params[] = $_GET['category'];
         }
         if (!empty($_GET['wood_species']) && $_GET['wood_species'] !== 'All') {
@@ -118,9 +154,9 @@ function handleCatalogRoutes(string $method, array $segments): void {
             $sql .= ' AND is_trending = 1';
         }
         if (!empty($_GET['search'])) {
-            $sql .= ' AND (title LIKE ? OR carving_style LIKE ? OR tags LIKE ? OR wood_species LIKE ?)';
+            $sql .= ' AND (title LIKE ? OR carving_style LIKE ? OR tags LIKE ? OR wood_species LIKE ? OR category LIKE ?)';
             $like = '%' . trim($_GET['search']) . '%';
-            array_push($params, $like, $like, $like, $like);
+            array_push($params, $like, $like, $like, $like, $like);
         }
 
         $sql .= ' ORDER BY is_trending DESC, created_at DESC';
@@ -129,40 +165,24 @@ function handleCatalogRoutes(string $method, array $segments): void {
         jsonResponse(['success' => true, 'designs' => $stmt->fetchAll()]);
     }
 
-    // POST /api/catalog (supports both multipart file upload and JSON)
+    // POST /api/catalog (Admin / Owner ONLY — supports multipart file upload and JSON)
     if ($method === 'POST' && $id === null) {
+        $authUser = requireRoles(['admin', 'owner']);
         $isMultipart = !empty($_POST) || !empty($_FILES);
         $data = $isMultipart ? $_POST : getJsonBody();
 
         $title = trim((string)($data['title'] ?? ''));
         if (!$title) jsonResponse(['success' => false, 'message' => 'Design title is required'], 400);
 
-        $uploadedUrls = [];
-        if (!empty($_FILES['images'])) {
-            $targetDir = __DIR__ . '/../uploads/catalog';
-            if (!is_dir($targetDir)) mkdir($targetDir, 0755, true);
+        $uploadedUrls = !empty($_FILES['images']) ? saveUploadedCatalogImages($_FILES['images']) : [];
 
-            $files = $_FILES['images'];
-            if (is_array($files['name'])) {
-                for ($i = 0; $i < count($files['name']); $i++) {
-                    if ($files['error'][$i] === UPLOAD_ERR_OK) {
-                        $ext = pathinfo($files['name'][$i], PATHINFO_EXTENSION) ?: 'jpg';
-                        $fname = 'catalog-' . time() . '-' . random_int(1000, 9999) . '.' . $ext;
-                        move_uploaded_file($files['tmp_name'][$i], "$targetDir/$fname");
-                        $uploadedUrls[] = "/uploads/catalog/$fname";
-                    }
-                }
-            } elseif ($files['error'] === UPLOAD_ERR_OK) {
-                $ext = pathinfo($files['name'], PATHINFO_EXTENSION) ?: 'jpg';
-                $fname = 'catalog-' . time() . '-' . random_int(1000, 9999) . '.' . $ext;
-                move_uploaded_file($files['tmp_name'], "$targetDir/$fname");
-                $uploadedUrls[] = "/uploads/catalog/$fname";
-            }
+        $primaryImage = $uploadedUrls[0] ?? trim((string)($data['image_url'] ?? ''));
+        if ($primaryImage === '') {
+            jsonResponse(['success' => false, 'message' => 'Please upload a design photo'], 400);
         }
-
-        $primaryImage = $uploadedUrls[0] ?? ($data['image_url'] ?? '/uploads/catalog/main-door-1.png');
         $extraImages = array_slice($uploadedUrls, 1);
         $isTrending = (!empty($data['is_trending']) && $data['is_trending'] !== '0' && $data['is_trending'] !== 'false') ? 1 : 0;
+        $category = trim((string)($data['category'] ?? 'Door')) ?: 'Door';
 
         $ins = $pdo->prepare(
             'INSERT INTO design_catalog (title, category, carving_style, wood_species, base_price, image_url, additional_images, tags, description, is_trending, created_by)
@@ -170,14 +190,14 @@ function handleCatalogRoutes(string $method, array $segments): void {
         );
         $ins->execute([
             $title,
-            $data['category'] ?? 'Door',
-            $data['carving_style'] ?? '',
-            $data['wood_species'] ?? 'Burma Teak',
+            $category,
+            trim((string)($data['carving_style'] ?? '')),
+            trim((string)($data['wood_species'] ?? 'Burma Teak')) ?: 'Burma Teak',
             (float)($data['base_price'] ?? 25000),
             $primaryImage,
             json_encode($extraImages),
-            $data['tags'] ?? '',
-            $data['description'] ?? '',
+            trim((string)($data['tags'] ?? '')),
+            trim((string)($data['description'] ?? '')),
             $isTrending,
             $authUser['id'],
         ]);
@@ -187,9 +207,12 @@ function handleCatalogRoutes(string $method, array $segments): void {
         jsonResponse(['success' => true, 'design' => $get->fetch()], 201);
     }
 
-    // PUT /api/catalog/:id
-    if ($method === 'PUT' && $id !== null) {
-        $body = getJsonBody();
+    // PUT /api/catalog/:id or POST /api/catalog/:id (Admin / Owner ONLY — POST supports multipart image replacement)
+    if (($method === 'PUT' || $method === 'POST') && $id !== null) {
+        requireRoles(['admin', 'owner']);
+        $isMultipart = !empty($_POST) || !empty($_FILES);
+        $body = $isMultipart ? $_POST : getJsonBody();
+
         $allowed = ['title', 'category', 'carving_style', 'wood_species', 'base_price', 'tags', 'description', 'is_trending', 'is_archived'];
         $fields = [];
         $params = [];
@@ -197,14 +220,29 @@ function handleCatalogRoutes(string $method, array $segments): void {
             if (array_key_exists($key, $body)) {
                 $fields[] = "$key = ?";
                 if ($key === 'is_trending' || $key === 'is_archived') {
-                    $params[] = $body[$key] ? 1 : 0;
+                    $v = $body[$key];
+                    $truthy = ($v === true || $v === 1 || $v === '1' || $v === 'true');
+                    $params[] = $truthy ? 1 : 0;
                 } elseif ($key === 'base_price') {
                     $params[] = (float)$body[$key];
                 } else {
-                    $params[] = $body[$key];
+                    $params[] = trim((string)$body[$key]);
                 }
             }
         }
+
+        if (!empty($_FILES['images'])) {
+            $uploadedUrls = saveUploadedCatalogImages($_FILES['images']);
+            if (!empty($uploadedUrls)) {
+                $fields[] = 'image_url = ?';
+                $params[] = $uploadedUrls[0];
+                if (count($uploadedUrls) > 1) {
+                    $fields[] = 'additional_images = ?';
+                    $params[] = json_encode(array_slice($uploadedUrls, 1));
+                }
+            }
+        }
+
         if (!$fields) jsonResponse(['success' => false, 'message' => 'No fields to update'], 400);
         $params[] = $id;
         $pdo->prepare('UPDATE design_catalog SET ' . implode(', ', $fields) . ' WHERE id = ?')->execute($params);
@@ -214,8 +252,13 @@ function handleCatalogRoutes(string $method, array $segments): void {
         jsonResponse(['success' => true, 'design' => $get->fetch()]);
     }
 
-    // DELETE /api/catalog/:id
+    // DELETE /api/catalog/:id (Admin / Owner ONLY)
     if ($method === 'DELETE' && $id !== null) {
+        requireRoles(['admin', 'owner']);
+        if (($_GET['permanent'] ?? '') === 'true') {
+            $pdo->prepare('DELETE FROM design_catalog WHERE id = ?')->execute([$id]);
+            jsonResponse(['success' => true, 'message' => 'Design permanently deleted']);
+        }
         $pdo->prepare('UPDATE design_catalog SET is_archived = 1 WHERE id = ?')->execute([$id]);
         jsonResponse(['success' => true, 'message' => 'Design archived']);
     }

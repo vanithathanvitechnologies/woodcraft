@@ -42,6 +42,19 @@ async function initDb() {
   const [[salesUser]] = await connection.query("SELECT id FROM users WHERE role = 'sales' LIMIT 1");
   const [[prodUser]] = await connection.query("SELECT id FROM users WHERE role = 'production' LIMIT 1");
 
+  // 1b. Seed default Wooden Categories
+  const seedCategories = [
+    ['Door', 'Main entrance doors, pooja doors, carved teak & single/double leaf doors', 1],
+    ['Wood Frames', 'Carved teak nilai frames, chowkhats, pillars & window frames', 2],
+    ['Hard Wood', 'Seasoned A-grade Burma teak, sal wood & timber sections', 3],
+  ];
+  for (const [name, desc, order] of seedCategories) {
+    await connection.query(
+      'INSERT IGNORE INTO wooden_categories (name, description, is_active, sort_order) VALUES (?, ?, 1, ?)',
+      [name, desc, order]
+    );
+  }
+
   // 2. Seed Design Catalog (uses Suresh Timbers catalog manifest if available)
   const [[catalogCount]] = await connection.query('SELECT COUNT(*) AS cnt FROM design_catalog');
   if (catalogCount.cnt === 0) {

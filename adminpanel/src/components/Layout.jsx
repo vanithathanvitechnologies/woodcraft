@@ -20,6 +20,12 @@ export default function Layout({ user, onLogout, children }) {
           <NavLink to="/" end className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
             <span>📊</span> Dashboard & Reports
           </NavLink>
+          <NavLink to="/categories" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+            <span>🪵</span> Wooden Categories
+          </NavLink>
+          <NavLink to="/catalog" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+            <span>🖼️</span> Design Catalog
+          </NavLink>
           <NavLink to="/customers" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
             <span>👥</span> Customers
           </NavLink>

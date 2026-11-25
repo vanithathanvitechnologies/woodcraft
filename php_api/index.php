@@ -28,6 +28,7 @@ require_once __DIR__ . '/helpers/constants.php';
 require_once __DIR__ . '/helpers/auth.php';
 require_once __DIR__ . '/routes/auth.php';
 require_once __DIR__ . '/routes/users.php';
+require_once __DIR__ . '/routes/categories.php';
 require_once __DIR__ . '/routes/catalog.php';
 require_once __DIR__ . '/routes/customers.php';
 require_once __DIR__ . '/routes/orders.php';
@@ -67,10 +68,11 @@ try {
     }
 
     if ($resource === 'meta') {
+        $activeCategories = getActiveWoodenCategoryNames(getDb());
         jsonResponse([
             'success' => true,
             'stages' => PRODUCTION_STAGES,
-            'categories' => WOODWORK_CATEGORIES,
+            'categories' => $activeCategories,
             'wood_species' => WOOD_SPECIES,
             'polish_shades' => POLISH_SHADES,
         ]);
@@ -82,6 +84,9 @@ try {
             break;
         case 'users':
             handleUsersRoutes($method, $rest);
+            break;
+        case 'categories':
+            handleCategoriesRoutes($method, $rest);
             break;
         case 'catalog':
             handleCatalogRoutes($method, $rest);

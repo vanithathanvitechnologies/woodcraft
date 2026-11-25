@@ -467,6 +467,162 @@ tr:hover td {
   margin-bottom: 14px;
 }
 
+.alert-success {
+  background: #eaf7f0;
+  color: var(--success);
+  border: 1px solid #bce2cd;
+  padding: 10px 14px;
+  border-radius: 9px;
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+
+.badge-trending {
+  background: var(--brass);
+  color: #fff;
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--wood-primary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+
+.btn-link:hover {
+  text-decoration: underline;
+}
+
+.catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(235px, 1fr));
+  gap: 16px;
+}
+
+.catalog-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.catalog-card:hover {
+  box-shadow: 0 8px 22px rgba(59, 33, 14, 0.08);
+  transform: translateY(-2px);
+}
+
+.catalog-card-media {
+  position: relative;
+  height: 210px;
+  background: #ffffff;
+  border-bottom: 1px solid var(--border);
+  padding: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-in;
+}
+
+.catalog-card-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.catalog-card-badges {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+.catalog-card-body {
+  padding: 12px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.catalog-card-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--wood-dark);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.catalog-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.catalog-card-sub {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.catalog-card-price {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--wood-primary);
+  margin-top: 2px;
+}
+
+.catalog-card-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid #f3eee7;
+}
+
+.upload-dropzone {
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  background: #fcfaf7;
+  min-height: 170px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.upload-dropzone:hover {
+  border-color: var(--wood-primary);
+  background: #f8f3eb;
+}
+
+.upload-preview-img {
+  max-width: 100%;
+  max-height: 240px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.upload-placeholder {
+  text-align: center;
+}
+
 .thumb {
   width: 46px;
   height: 62px;

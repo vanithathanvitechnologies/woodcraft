@@ -6,6 +6,7 @@ require('dotenv').config();
 const { PRODUCTION_STAGES, WOODWORK_CATEGORIES, WOOD_SPECIES, POLISH_SHADES } = require('./config/constants');
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
+const categoryRoutes = require('./routes/categories');
 const catalogRoutes = require('./routes/catalog');
 const customerRoutes = require('./routes/customers');
 const orderRoutes = require('./routes/orders');
@@ -32,11 +33,12 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-app.get('/api/meta', (req, res) => {
+app.get('/api/meta', async (req, res) => {
+  const activeCategories = await categoryRoutes.getActiveWoodenCategoryNames();
   res.json({
     success: true,
     stages: PRODUCTION_STAGES,
-    categories: WOODWORK_CATEGORIES,
+    categories: activeCategories || WOODWORK_CATEGORIES,
     wood_species: WOOD_SPECIES,
     polish_shades: POLISH_SHADES,
   });
@@ -45,6 +47,7 @@ app.get('/api/meta', (req, res) => {
 // Mount Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/categories', categoryRoutes);
 app.use('/api/catalog', catalogRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/orders', orderRoutes);
