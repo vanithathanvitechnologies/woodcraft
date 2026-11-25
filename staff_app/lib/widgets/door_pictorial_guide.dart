@@ -100,6 +100,7 @@ class DoorElementsPictorialCard extends StatefulWidget {
   final String generatedImageUrl;
   final List<PictorialElementItem> items;
   final Map<String, Rect>? normalizedRegions;
+  final double imageAspect;
   final VoidCallback? onTapMainImage;
 
   const DoorElementsPictorialCard({
@@ -109,6 +110,7 @@ class DoorElementsPictorialCard extends StatefulWidget {
     required this.generatedImageUrl,
     required this.items,
     this.normalizedRegions,
+    this.imageAspect = 0.75,
     this.onTapMainImage,
   });
 
@@ -337,6 +339,7 @@ class _DoorElementsPictorialCardState extends State<DoorElementsPictorialCard> {
                   cardRects: cardRects,
                   activeKey: _activeKey,
                   drawLeaderLines: true,
+                  doorAspect: widget.imageAspect,
                 ),
               ),
             ),
@@ -405,6 +408,7 @@ class _DoorElementsPictorialCardState extends State<DoorElementsPictorialCard> {
                               cardRects: const {},
                               activeKey: _activeKey,
                               drawLeaderLines: false,
+                              doorAspect: widget.imageAspect,
                             ),
                           ),
                         ),
@@ -567,6 +571,7 @@ class _PictorialOverlayPainter extends CustomPainter {
   final Map<String, Rect> cardRects;
   final String? activeKey;
   final bool drawLeaderLines;
+  final double doorAspect;
 
   _PictorialOverlayPainter({
     required this.doorContainerRect,
@@ -574,19 +579,20 @@ class _PictorialOverlayPainter extends CustomPainter {
     required this.cardRects,
     required this.activeKey,
     required this.drawLeaderLines,
+    this.doorAspect = 0.75,
   });
 
   Rect _mapRect(String key) {
     final norm = regions[key] ?? const Rect.fromLTWH(0.1, 0.1, 0.8, 0.8);
-    // Estimate rendered portrait door bounds inside the container (approx 0.78 aspect)
+    // Use exact server-reported rendered aspect ratio so zone boxes hug the door pixel-perfectly
     final cW = doorContainerRect.width;
     final cH = doorContainerRect.height;
-    const doorAspect = 0.78;
+    final aspect = doorAspect.clamp(0.45, 1.35);
     double rw = cW;
-    double rh = rw / doorAspect;
+    double rh = rw / aspect;
     if (rh > cH) {
       rh = cH;
-      rw = rh * doorAspect;
+      rw = rh * aspect;
     }
     final ox = doorContainerRect.left + (cW - rw) / 2.0;
     final oy = doorContainerRect.top + (cH - rh) / 2.0;
@@ -740,6 +746,7 @@ class _PictorialOverlayPainter extends CustomPainter {
     return oldDelegate.activeKey != activeKey ||
         oldDelegate.doorContainerRect != doorContainerRect ||
         oldDelegate.drawLeaderLines != drawLeaderLines ||
+        oldDelegate.doorAspect != doorAspect ||
         oldDelegate.regions != regions;
   }
 }

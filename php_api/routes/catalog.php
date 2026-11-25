@@ -117,6 +117,7 @@ function handleCatalogRoutes(string $method, array $segments): void {
             'ai_guide_image_url' => !empty($rendered['guide_filename']) ? ('/uploads/ai-outputs/' . $rendered['guide_filename']) : null,
             'element_regions' => $rendered['element_regions'] ?? null,
             'element_breakdown' => $rendered['element_breakdown'] ?? [],
+            'output_aspect' => $rendered['output_aspect'] ?? 0.75,
             'prompt_used' => $promptUsed,
             'engine' => $rendered['engine'] ?? 'php-real-photo-combiner',
             'reference_designs' => $refDesigns,
