@@ -4,6 +4,7 @@ import '../../core/app_theme.dart';
 import '../../core/constants.dart';
 import '../../services/api_service.dart';
 import '../../services/pdf_service.dart';
+import '../../widgets/door_pictorial_guide.dart';
 import '../../widgets/ui_kit.dart';
 
 class AiCombinerTab extends StatefulWidget {
@@ -18,7 +19,7 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
   List<dynamic> _catalog = [];
   bool _loadingCatalog = true;
 
-  // Selected 2-3 catalog designs + element per design
+  // Selected 1-5 catalog designs + element per design
   final Map<int, String> _selectedElements = {};
 
   // Specifications
@@ -38,7 +39,11 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
   // AI Output
   bool _generating = false;
   String? _aiImageUrl;
+  String? _aiGuideImageUrl;
   String? _aiPromptUsed;
+  Map<String, Rect>? _aiElementRegions;
+  List<PictorialElementItem> _aiBreakdownItems = [];
+  bool _showPictorialGuide = true;
 
   // Customer & Billing
   final _custNameCtrl = TextEditingController();
@@ -98,7 +103,10 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
       _category = newCategory;
       _selectedElements.clear();
       _aiImageUrl = null;
+      _aiGuideImageUrl = null;
       _aiPromptUsed = null;
+      _aiElementRegions = null;
+      _aiBreakdownItems = [];
 
       // Apply sensible default dimensions & carving hint for the chosen woodwork category
       switch (newCategory) {
@@ -135,22 +143,102 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
       if (_selectedElements.containsKey(id)) {
         _selectedElements.remove(id);
       } else {
-        if (_selectedElements.length >= 3) {
+        if (_selectedElements.length >= 5) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Maximum 3 reference designs can be combined.')),
+            const SnackBar(content: Text('Maximum 5 reference designs can be combined.')),
           );
           return;
         }
-        final defaultEl = AppConstants.combineElements[_selectedElements.length % AppConstants.combineElements.length];
+        // Automatically assign the first unused combine element among the 5 elements
+        final used = _selectedElements.values.toSet();
+        final defaultEl = AppConstants.combineElements.firstWhere(
+          (el) => !used.contains(el),
+          orElse: () => AppConstants.combineElements[_selectedElements.length % AppConstants.combineElements.length],
+        );
         _selectedElements[id] = defaultEl;
       }
     });
   }
 
+  Map<String, Rect>? _parseElementRegions(dynamic raw) {
+    if (raw is! Map) return null;
+    final out = <String, Rect>{};
+    raw.forEach((key, val) {
+      if (val is Map) {
+        final x = (val['x'] as num?)?.toDouble();
+        final y = (val['y'] as num?)?.toDouble();
+        final w = (val['w'] as num?)?.toDouble();
+        final h = (val['h'] as num?)?.toDouble();
+        if (x != null && y != null && w != null && h != null) {
+          out[key.toString()] = Rect.fromLTWH(x, y, w, h);
+        }
+      }
+    });
+    return out.isEmpty ? null : out;
+  }
+
+  List<PictorialElementItem> _buildBreakdownItems(dynamic serverBreakdown) {
+    if (serverBreakdown is List && serverBreakdown.isNotEmpty) {
+      return serverBreakdown.map((raw) {
+        final m = Map<String, dynamic>.from(raw as Map);
+        final key = (m['key'] ?? 'frame').toString();
+        final meta = CombineElementMeta.forKey(key);
+        return PictorialElementItem(
+          meta: meta,
+          designId: int.tryParse('${m['design_id']}') ?? 0,
+          designTitle: (m['design_title'] ?? 'Catalog Design').toString(),
+          designImageUrl: ApiService.instance.mediaUrl(m['design_image_url']?.toString()),
+          isExplicit: m['is_explicit'] == true,
+          description: (m['description'] ?? meta.defaultDescription).toString(),
+        );
+      }).toList();
+    }
+
+    // Local fallback when connected to an older API without element_breakdown
+    int? findId(bool Function(String low) test) {
+      for (final e in _selectedElements.entries) {
+        if (test(e.value.toLowerCase())) return e.key;
+      }
+      return null;
+    }
+
+    final frameId = findId((s) => s.contains('frame'));
+    final centerId = findId((s) => s.contains('center') || s.contains('carving'));
+    final borderId = findId((s) => s.contains('border') || s.contains('polish') || s.contains('finish'));
+    final crownId = findId((s) => s.contains('arch') || s.contains('crown') || s.contains('top'));
+    final panelId = findId((s) => s.contains('panel') || s.contains('layout'));
+    final firstId = _selectedElements.keys.isNotEmpty ? _selectedElements.keys.first : 0;
+    final baseId = frameId ?? panelId ?? crownId ?? centerId ?? firstId;
+
+    PictorialElementItem makeItem(CombineElementMeta meta, int? explicitId, int fallbackId, String desc) {
+      final did = explicitId ?? fallbackId;
+      final design = _catalog.cast<Map?>().firstWhere(
+            (c) => c != null && c['id'] == did,
+            orElse: () => null,
+          );
+      return PictorialElementItem(
+        meta: meta,
+        designId: did,
+        designTitle: (design?['title'] ?? 'Design #$did').toString(),
+        designImageUrl: ApiService.instance.mediaUrl(design?['image_url']?.toString()),
+        isExplicit: explicitId != null,
+        description: desc,
+      );
+    }
+
+    return [
+      makeItem(CombineElementMeta.all[0], frameId, baseId, 'Full outer wooden frame & left/right carved pillars'),
+      makeItem(CombineElementMeta.all[1], centerId, centerId ?? panelId ?? baseId, 'Main carving artwork inside the door leaf'),
+      makeItem(CombineElementMeta.all[2], borderId, baseId, '$_polishShade wood tone, shine & inner border molding'),
+      makeItem(CombineElementMeta.all[3], crownId, baseId, 'Curved top arch, temple carving & crown header only'),
+      makeItem(CombineElementMeta.all[4], panelId, panelId ?? centerId ?? baseId, 'Full inner door shutter & panel layout'),
+    ];
+  }
+
   Future<void> _generateAiDesign() async {
     if (_selectedElements.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select 1 to 3 reference catalog designs first.')),
+        const SnackBar(content: Text('Please select 1 to 5 reference catalog designs first.')),
       );
       return;
     }
@@ -180,7 +268,11 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
 
       setState(() {
         _aiImageUrl = res['ai_output_image_url']?.toString();
+        _aiGuideImageUrl = res['ai_guide_image_url']?.toString();
         _aiPromptUsed = res['prompt_used']?.toString();
+        _aiElementRegions = _parseElementRegions(res['element_regions']);
+        _aiBreakdownItems = _buildBreakdownItems(res['element_breakdown']);
+        _showPictorialGuide = true;
         final est = res['cost_estimate'] as Map<String, dynamic>?;
         if (est != null) {
           _totalCostCtrl.text = '${est['total_estimated_cost']}';
@@ -294,7 +386,7 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
                   children: [
                     Expanded(
                       child: Text(
-                        '1. Combine $_category Designs (${_selectedElements.length}/3 selected)',
+                        '1. Combine $_category Designs (${_selectedElements.length}/5 selected)',
                         style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.woodDark),
                       ),
                     ),
@@ -388,14 +480,15 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
                         final d = Map<String, dynamic>.from(filteredCatalog[i] as Map);
                         final id = d['id'] as int;
                         final selected = _selectedElements.containsKey(id);
+                        final elMeta = selected ? CombineElementMeta.forLabel(_selectedElements[id]!) : null;
                         return GestureDetector(
                           onTap: () => _toggleDesign(id),
                           child: Container(
-                            width: 110,
+                            width: 114,
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(10),
                               border: Border.all(
-                                color: selected ? AppTheme.woodPrimary : AppTheme.border,
+                                color: selected ? (elMeta?.color ?? AppTheme.woodPrimary) : AppTheme.border,
                                 width: selected ? 2.5 : 1,
                               ),
                             ),
@@ -435,14 +528,27 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
                                           ),
                                         ),
                                       ),
-                                      if (selected)
-                                        const Positioned(
+                                      if (selected && elMeta != null)
+                                        Positioned(
                                           top: 4,
                                           right: 4,
-                                          child: CircleAvatar(
-                                            radius: 12,
-                                            backgroundColor: AppTheme.woodPrimary,
-                                            child: Icon(Icons.check, size: 14, color: Colors.white),
+                                          child: Container(
+                                            width: 24,
+                                            height: 24,
+                                            alignment: Alignment.center,
+                                            decoration: BoxDecoration(
+                                              color: elMeta.color,
+                                              shape: BoxShape.circle,
+                                              border: Border.all(color: Colors.white, width: 1.8),
+                                            ),
+                                            child: Text(
+                                              '${elMeta.number}',
+                                              style: const TextStyle(
+                                                fontSize: 11.5,
+                                                fontWeight: FontWeight.w900,
+                                                color: Colors.white,
+                                              ),
+                                            ),
                                           ),
                                         ),
                                     ],
@@ -462,22 +568,80 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
                   ),
                 if (_selectedElements.isNotEmpty) ...[
                   const SizedBox(height: 12),
-                  const Text('Specify element from each selected design:',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 6),
+                  const Text('Specify element from each selected design (color-coded in output):',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.woodDark)),
+                  const SizedBox(height: 8),
                   ..._selectedElements.entries.map((entry) {
-                    final design = _catalog.firstWhere((c) => c['id'] == entry.key, orElse: () => {'title': 'Design #${entry.key}'});
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
+                    final design = _catalog.firstWhere(
+                      (c) => c['id'] == entry.key,
+                      orElse: () => {'title': 'Design #${entry.key}', 'image_url': ''},
+                    );
+                    final meta = CombineElementMeta.forLabel(entry.value);
+                    final thumbUrl = ApiService.instance.mediaUrl(design['image_url']?.toString());
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: meta.color.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(11),
+                        border: Border.all(color: meta.color.withValues(alpha: 0.35)),
+                      ),
                       child: Row(
                         children: [
-                          Expanded(child: Text('${design['title']}', style: const TextStyle(fontSize: 12.5))),
+                          Container(
+                            width: 24,
+                            height: 24,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(color: meta.color, shape: BoxShape.circle),
+                            child: Text(
+                              '${meta.number}',
+                              style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w900),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(6),
+                            child: Container(
+                              width: 30,
+                              height: 38,
+                              color: Colors.white,
+                              padding: const EdgeInsets.all(2),
+                              child: thumbUrl.isNotEmpty
+                                  ? Image.network(thumbUrl, fit: BoxFit.contain)
+                                  : const Icon(Icons.door_front_door_rounded, size: 18),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '${design['title']}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                            ),
+                          ),
                           const SizedBox(width: 8),
                           DropdownButton<String>(
                             value: entry.value,
-                            items: AppConstants.combineElements
-                                .map((el) => DropdownMenuItem(value: el, child: Text(el, style: const TextStyle(fontSize: 12))))
-                                .toList(),
+                            underline: const SizedBox.shrink(),
+                            items: AppConstants.combineElements.map((el) {
+                              final m = CombineElementMeta.forLabel(el);
+                              return DropdownMenuItem(
+                                value: el,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Container(
+                                      width: 10,
+                                      height: 10,
+                                      decoration: BoxDecoration(color: m.color, shape: BoxShape.circle),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text('${m.number}. $el', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                                  ],
+                                ),
+                              );
+                            }).toList(),
                             onChanged: (v) {
                               if (v != null) setState(() => _selectedElements[entry.key] = v);
                             },
@@ -632,7 +796,7 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
           ),
         ),
 
-        // Step 3: AI Output Preview
+        // Step 3: AI Output Preview & Pictorial Elements Breakdown
         if (_aiImageUrl != null) ...[
           const SizedBox(height: 12),
           Card(
@@ -641,103 +805,163 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
+                  Wrap(
+                    alignment: WrapAlignment.spaceBetween,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 10,
+                    runSpacing: 8,
                     children: [
-                      const Expanded(
-                        child: Text(
-                          '3. AI Generated Design Preview',
-                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.woodDark),
-                        ),
+                      const Text(
+                        '3. AI Generated Design Preview',
+                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.woodDark),
                       ),
-                      InkWell(
-                        borderRadius: BorderRadius.circular(20),
-                        onTap: () => UiKit.showFullImagePopup(
-                          context,
-                          imageUrl: ApiService.instance.mediaUrl(_aiImageUrl),
-                          title: 'AI Generated $_category Design',
-                          subtitle: '$_woodSpecies • $_polishShade • $_leafType',
-                          badge: 'HD PREVIEW',
-                        ),
-                        child: UiKit.iconChip(Icons.zoom_in_rounded, 'Tap for Full Size', color: AppTheme.info),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ChoiceChip(
+                            label: const Text('Pictorial Guide', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+                            avatar: Icon(
+                              Icons.account_tree_rounded,
+                              size: 15,
+                              color: _showPictorialGuide ? Colors.white : AppTheme.woodPrimary,
+                            ),
+                            selected: _showPictorialGuide,
+                            showCheckmark: false,
+                            selectedColor: AppTheme.woodPrimary,
+                            labelStyle: TextStyle(color: _showPictorialGuide ? Colors.white : AppTheme.woodDark),
+                            onSelected: (_) => setState(() => _showPictorialGuide = true),
+                          ),
+                          const SizedBox(width: 6),
+                          ChoiceChip(
+                            label: const Text('Clean HD Door', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+                            avatar: Icon(
+                              Icons.door_front_door_rounded,
+                              size: 15,
+                              color: !_showPictorialGuide ? Colors.white : AppTheme.woodPrimary,
+                            ),
+                            selected: !_showPictorialGuide,
+                            showCheckmark: false,
+                            selectedColor: AppTheme.woodPrimary,
+                            labelStyle: TextStyle(color: !_showPictorialGuide ? Colors.white : AppTheme.woodDark),
+                            onSelected: (_) => setState(() => _showPictorialGuide = false),
+                          ),
+                        ],
                       ),
                     ],
                   ),
                   const SizedBox(height: 12),
-                  LayoutBuilder(
-                    builder: (ctx, box) {
-                      final isWide = box.maxWidth > 620;
-                      final previewHeight = isWide ? 560.0 : 450.0;
-                      return MouseRegion(
-                        cursor: SystemMouseCursors.click,
-                        child: GestureDetector(
-                          onTap: () => UiKit.showFullImagePopup(
-                            context,
-                            imageUrl: ApiService.instance.mediaUrl(_aiImageUrl),
-                            title: 'AI Generated $_category Design',
-                            subtitle: '$_woodSpecies • $_polishShade • $_leafType',
-                            badge: 'HD PREVIEW',
-                          ),
-                          child: Container(
-                            width: double.infinity,
-                            padding: EdgeInsets.symmetric(horizontal: isWide ? 24 : 10, vertical: 16),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFFAF6F0),
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(color: AppTheme.border),
+                  if (_showPictorialGuide)
+                    DoorElementsPictorialCard(
+                      category: _category,
+                      polishShade: _polishShade,
+                      generatedImageUrl: ApiService.instance.mediaUrl(_aiImageUrl),
+                      items: _aiBreakdownItems.isNotEmpty ? _aiBreakdownItems : _buildBreakdownItems(null),
+                      normalizedRegions: _aiElementRegions,
+                      onTapMainImage: () => UiKit.showFullImagePopup(
+                        context,
+                        imageUrl: ApiService.instance.mediaUrl(
+                          (_aiGuideImageUrl != null && _aiGuideImageUrl!.isNotEmpty)
+                              ? _aiGuideImageUrl
+                              : _aiImageUrl,
+                        ),
+                        title: 'AI Combined $_category — 5 Elements Breakdown',
+                        subtitle: '$_woodSpecies • $_polishShade • $_leafType',
+                        badge: 'HD PICTORIAL GUIDE',
+                      ),
+                    )
+                  else
+                    LayoutBuilder(
+                      builder: (ctx, box) {
+                        final isWide = box.maxWidth > 620;
+                        final previewHeight = isWide ? 560.0 : 450.0;
+                        return MouseRegion(
+                          cursor: SystemMouseCursors.click,
+                          child: GestureDetector(
+                            onTap: () => UiKit.showFullImagePopup(
+                              context,
+                              imageUrl: ApiService.instance.mediaUrl(_aiImageUrl),
+                              title: 'AI Generated $_category Design',
+                              subtitle: '$_woodSpecies • $_polishShade • $_leafType',
+                              badge: 'HD PREVIEW',
                             ),
-                            child: Center(
-                              child: Container(
-                                height: previewHeight,
-                                constraints: const BoxConstraints(maxWidth: 520),
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(color: AppTheme.border),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: AppTheme.woodDark.withValues(alpha: 0.08),
-                                      blurRadius: 18,
-                                      offset: const Offset(0, 6),
+                            child: Container(
+                              width: double.infinity,
+                              padding: EdgeInsets.symmetric(horizontal: isWide ? 24 : 10, vertical: 16),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFAF6F0),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: AppTheme.border),
+                              ),
+                              child: Center(
+                                child: Container(
+                                  height: previewHeight,
+                                  constraints: const BoxConstraints(maxWidth: 520),
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(color: AppTheme.border),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: AppTheme.woodDark.withValues(alpha: 0.08),
+                                        blurRadius: 18,
+                                        offset: const Offset(0, 6),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Image.network(
+                                    ApiService.instance.mediaUrl(_aiImageUrl),
+                                    fit: BoxFit.contain,
+                                    filterQuality: FilterQuality.high,
+                                    isAntiAlias: true,
+                                    loadingBuilder: (context, child, progress) {
+                                      if (progress == null) return child;
+                                      return const Center(child: CircularProgressIndicator());
+                                    },
+                                    errorBuilder: (_, __, ___) => const Center(
+                                      child: Icon(Icons.broken_image_outlined, size: 48, color: AppTheme.textMuted),
                                     ),
-                                  ],
-                                ),
-                                child: Image.network(
-                                  ApiService.instance.mediaUrl(_aiImageUrl),
-                                  fit: BoxFit.contain,
-                                  filterQuality: FilterQuality.high,
-                                  isAntiAlias: true,
-                                  loadingBuilder: (context, child, progress) {
-                                    if (progress == null) return child;
-                                    return const Center(child: CircularProgressIndicator());
-                                  },
-                                  errorBuilder: (_, __, ___) => const Center(
-                                    child: Icon(Icons.broken_image_outlined, size: 48, color: AppTheme.textMuted),
                                   ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 10),
-                  Center(
-                    child: OutlinedButton.icon(
-                      onPressed: () => UiKit.showFullImagePopup(
-                        context,
-                        imageUrl: ApiService.instance.mediaUrl(_aiImageUrl),
-                        title: 'AI Generated $_category Design',
-                        subtitle: '$_woodSpecies • $_polishShade • $_leafType',
-                        badge: 'HD PREVIEW',
-                      ),
-                      icon: const Icon(Icons.fullscreen_rounded, size: 18),
-                      label: const Text('Open Full-Size HD Zoom'),
+                        );
+                      },
                     ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: 10,
+                    runSpacing: 8,
+                    children: [
+                      if (_aiGuideImageUrl != null && _aiGuideImageUrl!.isNotEmpty)
+                        ElevatedButton.icon(
+                          onPressed: () => UiKit.showFullImagePopup(
+                            context,
+                            imageUrl: ApiService.instance.mediaUrl(_aiGuideImageUrl),
+                            title: 'AI Combined $_category — 5 Elements Breakdown',
+                            subtitle: '$_woodSpecies • $_polishShade • $_leafType',
+                            badge: 'HD PICTORIAL GUIDE',
+                          ),
+                          icon: const Icon(Icons.account_tree_rounded, size: 17),
+                          label: const Text('Full-Size HD Guide'),
+                        ),
+                      OutlinedButton.icon(
+                        onPressed: () => UiKit.showFullImagePopup(
+                          context,
+                          imageUrl: ApiService.instance.mediaUrl(_aiImageUrl),
+                          title: 'AI Generated $_category Design',
+                          subtitle: '$_woodSpecies • $_polishShade • $_leafType',
+                          badge: 'HD CLEAN DOOR',
+                        ),
+                        icon: const Icon(Icons.fullscreen_rounded, size: 18),
+                        label: const Text('Full-Size Clean Door'),
+                      ),
+                    ],
                   ),
                   if (_aiPromptUsed != null) ...[
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 10),
                     Text(_aiPromptUsed!, style: const TextStyle(fontSize: 11.5, color: Colors.black54)),
                   ],
                 ],

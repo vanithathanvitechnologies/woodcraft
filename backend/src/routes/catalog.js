@@ -174,10 +174,10 @@ router.post('/ai-combine', authenticateToken, requireRoles('admin', 'owner', 'sa
       custom_notes = '',
     } = req.body;
 
-    if (!Array.isArray(reference_design_ids) || reference_design_ids.length < 1 || reference_design_ids.length > 3) {
+    if (!Array.isArray(reference_design_ids) || reference_design_ids.length < 1 || reference_design_ids.length > 5) {
       return res.status(400).json({
         success: false,
-        message: 'Select between 1 and 3 catalog reference designs to combine',
+        message: 'Select between 1 and 5 catalog reference designs to combine',
       });
     }
 

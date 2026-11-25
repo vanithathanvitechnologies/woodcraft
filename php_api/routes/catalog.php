@@ -11,8 +11,8 @@ function handleCatalogRoutes(string $method, array $segments): void {
         $refIds = $body['reference_design_ids'] ?? [];
         $refElements = $body['reference_elements'] ?? [];
 
-        if (!is_array($refIds) || count($refIds) < 1 || count($refIds) > 3) {
-            jsonResponse(['success' => false, 'message' => 'Select between 1 and 3 catalog reference designs'], 400);
+        if (!is_array($refIds) || count($refIds) < 1 || count($refIds) > 5) {
+            jsonResponse(['success' => false, 'message' => 'Select between 1 and 5 catalog reference designs'], 400);
         }
 
         $placeholders = implode(',', array_fill(0, count($refIds), '?'));
@@ -79,6 +79,9 @@ function handleCatalogRoutes(string $method, array $segments): void {
         jsonResponse([
             'success' => true,
             'ai_output_image_url' => '/uploads/ai-outputs/' . $rendered['filename'],
+            'ai_guide_image_url' => !empty($rendered['guide_filename']) ? ('/uploads/ai-outputs/' . $rendered['guide_filename']) : null,
+            'element_regions' => $rendered['element_regions'] ?? null,
+            'element_breakdown' => $rendered['element_breakdown'] ?? [],
             'prompt_used' => $promptUsed,
             'engine' => $rendered['engine'] ?? 'php-real-photo-combiner',
             'reference_designs' => $refDesigns,

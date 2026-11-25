@@ -1028,6 +1028,412 @@ function tryGeminiAiCombine(array $opts, string $promptText, string $fullPath): 
 }
 
 /**
+ * Finds an available TrueType font file on Windows or Linux/cPanel servers.
+ */
+function findTtfFontPath(bool $bold = false): ?string {
+    $candidates = $bold
+        ? [
+            __DIR__ . '/../assets/fonts/Inter-Bold.ttf',
+            'C:\\Windows\\Fonts\\segoeuib.ttf',
+            'C:\\Windows\\Fonts\\arialbd.ttf',
+            '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+            '/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf',
+            '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
+            '/usr/share/fonts/liberation/LiberationSans-Bold.ttf',
+            '/usr/share/fonts/truetype/freefont/FreeSansBold.ttf',
+        ]
+        : [
+            __DIR__ . '/../assets/fonts/Inter-Regular.ttf',
+            'C:\\Windows\\Fonts\\segoeui.ttf',
+            'C:\\Windows\\Fonts\\arial.ttf',
+            '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+            '/usr/share/fonts/dejavu/DejaVuSans.ttf',
+            '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+            '/usr/share/fonts/liberation/LiberationSans-Regular.ttf',
+            '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
+        ];
+    foreach ($candidates as $path) {
+        if (is_file($path)) return $path;
+    }
+    return null;
+}
+
+/**
+ * Draws a filled or stroked rounded rectangle cleanly on a GD canvas.
+ */
+function gdDrawRoundedRect($im, int $x1, int $y1, int $x2, int $y2, int $r, int $color, bool $filled = true, int $thickness = 2): void {
+    $r = max(0, min($r, (int)(($x2 - $x1) / 2), (int)(($y2 - $y1) / 2)));
+    if ($filled) {
+        imagefilledrectangle($im, $x1 + $r, $y1, $x2 - $r, $y2, $color);
+        imagefilledrectangle($im, $x1, $y1 + $r, $x2, $y2 - $r, $color);
+        if ($r > 0) {
+            imagefilledellipse($im, $x1 + $r, $y1 + $r, $r * 2, $r * 2, $color);
+            imagefilledellipse($im, $x2 - $r, $y1 + $r, $r * 2, $r * 2, $color);
+            imagefilledellipse($im, $x1 + $r, $y2 - $r, $r * 2, $r * 2, $color);
+            imagefilledellipse($im, $x2 - $r, $y2 - $r, $r * 2, $r * 2, $color);
+        }
+        return;
+    }
+    for ($t = 0; $t < $thickness; $t++) {
+        $ax1 = $x1 + $t; $ay1 = $y1 + $t; $ax2 = $x2 - $t; $ay2 = $y2 - $t;
+        $ar = max(0, $r - $t);
+        imageline($im, $ax1 + $ar, $ay1, $ax2 - $ar, $ay1, $color);
+        imageline($im, $ax1 + $ar, $ay2, $ax2 - $ar, $ay2, $color);
+        imageline($im, $ax1, $ay1 + $ar, $ax1, $ay2 - $ar, $color);
+        imageline($im, $ax2, $ay1 + $ar, $ax2, $ay2 - $ar, $color);
+        if ($ar > 0) {
+            imagearc($im, $ax1 + $ar, $ay1 + $ar, $ar * 2, $ar * 2, 180, 270, $color);
+            imagearc($im, $ax2 - $ar, $ay1 + $ar, $ar * 2, $ar * 2, 270, 360, $color);
+            imagearc($im, $ax2 - $ar, $ay2 - $ar, $ar * 2, $ar * 2, 0, 90, $color);
+            imagearc($im, $ax1 + $ar, $ay2 - $ar, $ar * 2, $ar * 2, 90, 180, $color);
+        }
+    }
+}
+
+/**
+ * Draws a solid or dashed thick rectangular zone highlight on a GD image.
+ */
+function gdDrawZoneBox($im, int $x1, int $y1, int $x2, int $y2, int $color, int $thickness = 3, bool $dashed = false): void {
+    if (!$dashed) {
+        gdDrawRoundedRect($im, $x1, $y1, $x2, $y2, 8, $color, false, $thickness);
+        return;
+    }
+    $dash = 14;
+    $gap = 8;
+    for ($t = 0; $t < $thickness; $t++) {
+        $lx1 = $x1 + $t; $ly1 = $y1 + $t; $lx2 = $x2 - $t; $ly2 = $y2 - $t;
+        for ($x = $lx1; $x < $lx2; $x += ($dash + $gap)) {
+            $ex = min($lx2, $x + $dash);
+            imageline($im, $x, $ly1, $ex, $ly1, $color);
+            imageline($im, $x, $ly2, $ex, $ly2, $color);
+        }
+        for ($y = $ly1; $y < $ly2; $y += ($dash + $gap)) {
+            $ey = min($ly2, $y + $dash);
+            imageline($im, $lx1, $y, $lx1, $ey, $color);
+            imageline($im, $lx2, $y, $lx2, $ey, $color);
+        }
+    }
+}
+
+/**
+ * Draws a crisp thick anti-aliased line segment between two points (works reliably even with imageantialias).
+ */
+function gdDrawThickLine($im, int $x1, int $y1, int $x2, int $y2, int $color, int $thickness = 3): void {
+    $dx = $x2 - $x1;
+    $dy = $y2 - $y1;
+    $len = sqrt($dx * $dx + $dy * $dy);
+    if ($len < 0.5) return;
+    $half = $thickness / 2.0;
+    $nx = (-$dy / $len) * $half;
+    $ny = ($dx / $len) * $half;
+    $pts = [
+        (int)round($x1 + $nx), (int)round($y1 + $ny),
+        (int)round($x2 + $nx), (int)round($y2 + $ny),
+        (int)round($x2 - $nx), (int)round($y2 - $ny),
+        (int)round($x1 - $nx), (int)round($y1 - $ny),
+    ];
+    imagefilledpolygon($im, $pts, $color);
+}
+
+/**
+ * Draws text using TrueType font if available (with automatic GD bitmap fallback).
+ */
+function gdDrawText($im, float $sizePt, int $x, int $y, int $color, string $text, ?string $fontPath, string $align = 'left'): void {
+    if ($fontPath !== null && function_exists('imagettftext')) {
+        $bbox = @imagettfbbox($sizePt, 0, $fontPath, $text);
+        $tw = $bbox ? abs($bbox[2] - $bbox[0]) : 0;
+        $drawX = $x;
+        if ($align === 'center') $drawX = (int)round($x - $tw / 2.0);
+        elseif ($align === 'right') $drawX = (int)round($x - $tw);
+        @imagettftext($im, $sizePt, 0, $drawX, $y, $color, $fontPath, $text);
+        return;
+    }
+    $gFont = $sizePt >= 14 ? 5 : ($sizePt >= 11 ? 4 : 3);
+    $fw = imagefontwidth($gFont) * strlen($text);
+    $drawX = $x;
+    if ($align === 'center') $drawX = (int)round($x - $fw / 2.0);
+    elseif ($align === 'right') $drawX = (int)round($x - $fw);
+    imagestring($im, $gFont, $drawX, $y - imagefontheight($gFont), $text, $color);
+}
+
+/**
+ * Word-wraps a string into lines that fit within $maxWidth px.
+ */
+function gdWrapText(string $text, float $sizePt, ?string $fontPath, int $maxWidth, int $maxLines = 2): array {
+    $words = preg_split('/\s+/', trim($text)) ?: [];
+    if (empty($words)) return [''];
+    $lines = [];
+    $current = '';
+
+    $measure = function (string $s) use ($sizePt, $fontPath): int {
+        if ($fontPath !== null && function_exists('imagettfbbox')) {
+            $b = @imagettfbbox($sizePt, 0, $fontPath, $s);
+            return $b ? (int)abs($b[2] - $b[0]) : strlen($s) * 8;
+        }
+        return strlen($s) * 7;
+    };
+
+    foreach ($words as $w) {
+        $test = $current === '' ? $w : ($current . ' ' . $w);
+        if ($measure($test) <= $maxWidth || $current === '') {
+            $current = $test;
+        } else {
+            $lines[] = $current;
+            $current = $w;
+            if (count($lines) >= $maxLines - 1) {
+                // Append remaining words into last line with ellipsis if too long
+                break;
+            }
+        }
+    }
+    if ($current !== '') {
+        // Check if we stopped early and append remaining words
+        $usedCount = 0;
+        foreach ($lines as $ln) $usedCount += count(preg_split('/\s+/', trim($ln)) ?: []);
+        $rest = implode(' ', array_slice($words, $usedCount));
+        if ($rest === '') $rest = $current;
+        while ($measure($rest) > $maxWidth && strlen($rest) > 8) {
+            $rest = rtrim(substr($rest, 0, -4)) . '...';
+        }
+        $lines[] = $rest;
+    }
+    return array_slice($lines, 0, $maxLines);
+}
+
+/**
+ * Draws a numbered circular color badge with crisp white ring.
+ */
+function gdDrawBadgeCircle($im, int $cx, int $cy, int $radius, int $fillCol, int $whiteCol, string $label, ?string $boldFont): void {
+    imagefilledellipse($im, $cx, $cy, ($radius + 3) * 2, ($radius + 3) * 2, $whiteCol);
+    imagefilledellipse($im, $cx, $cy, $radius * 2, $radius * 2, $fillCol);
+    $fontPt = max(10.0, $radius * 0.82);
+    gdDrawText($im, $fontPt, $cx, (int)round($cy + $fontPt * 0.48), $whiteCol, $label, $boldFont, 'center');
+}
+
+/**
+ * Renders the HD Pictorial 5-Combine-Elements Guide PNG matching the reference diagram:
+ *  - Dark wood header banner
+ *  - Center generated HD door with exact color-coded zone outlines & numbered badges (1..5)
+ *  - Left (4 Top Arch & Crown, 1 Frame Style, 5 Panel Layout) & Right (2 Center Carving,
+ *    3 Border / Polish Finish) callout cards containing each source catalog design's thumbnail,
+ *    source title, and style breakdown, linked by crisp bent leader lines.
+ */
+function renderAnnotatedGuidePngPhp(
+    $doorImg,
+    array $regions,
+    array $breakdown,
+    array $sourceThumbImgs,
+    string $category,
+    string $guidePath
+): bool {
+    if (!function_exists('imagecreatetruecolor')) return false;
+
+    $W = 1600;
+    $H = 1180;
+    $im = imagecreatetruecolor($W, $H);
+    imagealphablending($im, true);
+    if (function_exists('imageantialias')) {
+        @imageantialias($im, true);
+    }
+
+    $fontBold = findTtfFontPath(true);
+    $fontReg  = findTtfFontPath(false) ?? $fontBold;
+
+    // Palette matching the reference pictorial diagram
+    $creamBg    = imagecolorallocate($im, 250, 247, 242);
+    $headerBg   = imagecolorallocate($im, 56, 30, 14);
+    $white      = imagecolorallocate($im, 255, 255, 255);
+    $creamSub   = imagecolorallocate($im, 236, 222, 204);
+    $cardBorder = imagecolorallocate($im, 226, 217, 204);
+    $textDark   = imagecolorallocate($im, 42, 24, 12);
+    $textMuted  = imagecolorallocate($im, 108, 92, 78);
+    $thumbBg    = imagecolorallocate($im, 252, 250, 247);
+
+    $elemColors = [
+        'frame'  => imagecolorallocate($im, 37, 99, 235),  // 1 Blue
+        'center' => imagecolorallocate($im, 234, 88, 12),  // 2 Orange
+        'border' => imagecolorallocate($im, 147, 51, 234), // 3 Purple
+        'crown'  => imagecolorallocate($im, 220, 38, 38),  // 4 Red
+        'panel'  => imagecolorallocate($im, 22, 163, 74),  // 5 Green
+    ];
+
+    // 1) Backdrop & dark wood header banner
+    imagefilledrectangle($im, 0, 0, $W, $H, $creamBg);
+    imagefilledrectangle($im, 0, 0, $W, 96, $headerBg);
+
+    gdDrawText($im, 24, (int)($W / 2), 46, $white, "Custom $category — 5 Combine Elements Guide", $fontBold, 'center');
+    gdDrawText($im, 12, (int)($W / 2), 76, $creamSub, 'Each color highlights the exact area & source catalog frame picked when combining designs', $fontReg, 'center');
+
+    // 2) Center Generated HD Door Showcase Container
+    $boxX0 = 448; $boxY0 = 114; $boxX1 = 1152; $boxY1 = 1114;
+    gdDrawRoundedRect($im, $boxX0, $boxY0, $boxX1, $boxY1, 18, $white, true);
+    gdDrawRoundedRect($im, $boxX0, $boxY0, $boxX1, $boxY1, 18, $cardBorder, false, 2);
+
+    $dw = imagesx($doorImg);
+    $dh = imagesy($doorImg);
+    $pad = 12;
+    $availW = ($boxX1 - $boxX0) - $pad * 2;
+    $availH = ($boxY1 - $boxY0) - $pad * 2;
+    $scale = min($availW / max(1.0, (float)$dw), $availH / max(1.0, (float)$dh));
+    $drawW = (int)round($dw * $scale);
+    $drawH = (int)round($dh * $scale);
+    $drawX = $boxX0 + (int)round((($boxX1 - $boxX0) - $drawW) / 2.0);
+    $drawY = $boxY0 + (int)round((($boxY1 - $boxY0) - $drawH) / 2.0);
+
+    imagecopyresampled($im, $doorImg, $drawX, $drawY, 0, 0, $drawW, $drawH, $dw, $dh);
+
+    // Map normalized 0..1 regions onto exact pixel rects on the center door
+    $mapZone = function (string $key) use ($regions, $drawX, $drawY, $drawW, $drawH): array {
+        $r = $regions[$key] ?? ['x' => 0.1, 'y' => 0.1, 'w' => 0.8, 'h' => 0.8];
+        $x1 = $drawX + (int)round($r['x'] * $drawW);
+        $y1 = $drawY + (int)round($r['y'] * $drawH);
+        $x2 = $x1 + max(24, (int)round($r['w'] * $drawW));
+        $y2 = $y1 + max(24, (int)round($r['h'] * $drawH));
+        return [$x1, $y1, $x2, $y2];
+    };
+
+    $byKey = [];
+    foreach ($breakdown as $item) {
+        $byKey[$item['key']] = $item;
+    }
+
+    // Draw color-coded zone boxes on the center door (same layering as attached guide!)
+    $zCrown  = $mapZone('crown');
+    $zFrame  = $mapZone('frame');
+    $zPanel  = $mapZone('panel');
+    $zCenter = $mapZone('center');
+    $zBorder = $mapZone('border');
+
+    if (isset($byKey['frame']))  gdDrawZoneBox($im, $zFrame[0], $zFrame[1], $zFrame[2], $zFrame[3], $elemColors['frame'], 3, true);
+    if (isset($byKey['panel']))  gdDrawZoneBox($im, $zPanel[0], $zPanel[1], $zPanel[2], $zPanel[3], $elemColors['panel'], 3, true);
+    if (isset($byKey['center'])) gdDrawZoneBox($im, $zCenter[0], $zCenter[1], $zCenter[2], $zCenter[3], $elemColors['center'], 3, false);
+    if (isset($byKey['border'])) gdDrawZoneBox($im, $zBorder[0], $zBorder[1], $zBorder[2], $zBorder[3], $elemColors['border'], 3, false);
+    if (isset($byKey['crown']))  gdDrawZoneBox($im, $zCrown[0], $zCrown[1], $zCrown[2], $zCrown[3], $elemColors['crown'], 3, false);
+
+    // Badge coordinates right on the door zones
+    $crownCx = (int)round(($zCrown[0] + $zCrown[2]) / 2.0);
+    $crownCy = (int)round(($zCrown[1] + $zCrown[3]) / 2.0);
+    $frameBadgeX = $zFrame[0] + max(18, (int)round(($zPanel[0] - $zFrame[0]) * 0.55));
+    $frameBadgeY = (int)round($zFrame[1] + ($zFrame[3] - $zFrame[1]) * 0.44);
+    $panelBadgeX = $zPanel[0] + max(24, (int)round(($zPanel[2] - $zPanel[0]) * 0.22));
+    $panelBadgeY = $zPanel[3] - 20;
+    $centerBadgeX = (int)round(($zCenter[0] + $zCenter[2]) / 2.0);
+    $centerBadgeY = (int)round(($zCenter[1] + $zCenter[3]) / 2.0);
+    $borderBadgeX = (int)round(($zBorder[0] + $zBorder[2]) / 2.0);
+    $borderBadgeY = $zBorder[3] - 26;
+
+    // Leader line target dots on the door edges
+    $targets = [
+        'crown'  => [$zCrown[0] + 18, $crownCy],
+        'frame'  => [$zFrame[0], (int)round($zFrame[1] + ($zFrame[3] - $zFrame[1]) * 0.34)],
+        'panel'  => [$zPanel[0] + 8, $zPanel[3] - 46],
+        'center' => [$zCenter[2] - 8, (int)round($zCenter[1] + ($zCenter[3] - $zCenter[1]) * 0.35)],
+        'border' => [$zBorder[2], (int)round(($zBorder[1] + $zBorder[3]) / 2.0)],
+    ];
+
+    // Left & Right Callout Card slots matching attached guide layout
+    $cardSlots = [
+        'crown'  => ['side' => 'left',  'x1' => 26,   'y1' => 142, 'x2' => 414,  'y2' => 332],
+        'frame'  => ['side' => 'left',  'x1' => 26,   'y1' => 478, 'x2' => 414,  'y2' => 668],
+        'panel'  => ['side' => 'left',  'x1' => 26,   'y1' => 826, 'x2' => 414,  'y2' => 1016],
+        'center' => ['side' => 'right', 'x1' => 1186, 'y1' => 296, 'x2' => 1574, 'y2' => 486],
+        'border' => ['side' => 'right', 'x1' => 1186, 'y1' => 708, 'x2' => 1574, 'y2' => 898],
+    ];
+
+    foreach ($cardSlots as $key => $slot) {
+        if (!isset($byKey[$key])) continue;
+        $item = $byKey[$key];
+        $col = $elemColors[$key];
+        $x1 = $slot['x1']; $y1 = $slot['y1']; $x2 = $slot['x2']; $y2 = $slot['y2'];
+        $midY = (int)round(($y1 + $y2) / 2.0);
+        [$tx, $ty] = $targets[$key];
+
+        // Bent leader line connecting card to exact target point on the door
+        if ($slot['side'] === 'left') {
+            $elbowX = $x2 + 28;
+            gdDrawThickLine($im, $x2, $midY, $elbowX, $midY, $col, 3);
+            gdDrawThickLine($im, $elbowX, $midY, $tx, $ty, $col, 3);
+        } else {
+            $elbowX = $x1 - 28;
+            gdDrawThickLine($im, $x1, $midY, $elbowX, $midY, $col, 3);
+            gdDrawThickLine($im, $elbowX, $midY, $tx, $ty, $col, 3);
+        }
+        // White-ringed target dot on door
+        imagefilledellipse($im, $tx, $ty, 16, 16, $white);
+        imagefilledellipse($im, $tx, $ty, 10, 10, $col);
+
+        // Callout card container
+        gdDrawRoundedRect($im, $x1, $y1, $x2, $y2, 14, $white, true);
+        gdDrawRoundedRect($im, $x1, $y1, $x2, $y2, 14, $col, false, 3);
+
+        // Mini source catalog thumbnail on the left inside the card
+        $thX = $x1 + 14;
+        $thY = $y1 + 16;
+        $thW = 86;
+        $thH = ($y2 - $y1) - 32;
+        gdDrawRoundedRect($im, $thX, $thY, $thX + $thW, $thY + $thH, 8, $thumbBg, true);
+        gdDrawRoundedRect($im, $thX, $thY, $thX + $thW, $thY + $thH, 8, $cardBorder, false, 1);
+
+        $did = (int)($item['design_id'] ?? 0);
+        if (isset($sourceThumbImgs[$did])) {
+            $tImg = $sourceThumbImgs[$did];
+            $tw = imagesx($tImg);
+            $th = imagesy($tImg);
+            $ts = min(($thW - 8) / max(1.0, (float)$tw), ($thH - 8) / max(1.0, (float)$th));
+            $tdw = max(8, (int)round($tw * $ts));
+            $tdh = max(8, (int)round($th * $ts));
+            $tdx = $thX + (int)round(($thW - $tdw) / 2.0);
+            $tdy = $thY + (int)round(($thH - $tdh) / 2.0);
+            imagecopyresampled($im, $tImg, $tdx, $tdy, 0, 0, $tdw, $tdh, $tw, $th);
+        }
+
+        // Badge + Element title + Source catalog name + Craft description
+        $txtX = $thX + $thW + 14;
+        $txtMaxW = ($x2 - 14) - $txtX;
+        gdDrawBadgeCircle($im, $txtX + 14, $y1 + 32, 14, $col, $white, (string)$item['number'], $fontBold);
+        gdDrawText($im, 13.5, $txtX + 36, $y1 + 38, $textDark, (string)$item['label'], $fontBold, 'left');
+
+        $srcPrefix = !empty($item['is_explicit']) ? 'From: ' : 'Base: ';
+        $srcLines = gdWrapText($srcPrefix . (string)($item['design_title'] ?? ''), 10.5, $fontBold, $txtMaxW, 2);
+        $curY = $y1 + 66;
+        foreach ($srcLines as $ln) {
+            gdDrawText($im, 10.5, $txtX, $curY, $col, $ln, $fontBold, 'left');
+            $curY += 20;
+        }
+
+        $descLines = gdWrapText((string)($item['description'] ?? ''), 9.5, $fontReg, $txtMaxW, 2);
+        $curY += 6;
+        foreach ($descLines as $ln) {
+            gdDrawText($im, 9.5, $txtX, $curY, $textMuted, $ln, $fontReg, 'left');
+            $curY += 18;
+        }
+    }
+
+    // Numbered circular badges right on top of the center door zones
+    if (isset($byKey['crown']))  gdDrawBadgeCircle($im, $crownCx, $crownCy, 18, $elemColors['crown'], $white, '4', $fontBold);
+    if (isset($byKey['frame']))  gdDrawBadgeCircle($im, $frameBadgeX, $frameBadgeY, 18, $elemColors['frame'], $white, '1', $fontBold);
+    if (isset($byKey['panel']))  gdDrawBadgeCircle($im, $panelBadgeX, $panelBadgeY, 18, $elemColors['panel'], $white, '5', $fontBold);
+    if (isset($byKey['center'])) gdDrawBadgeCircle($im, $centerBadgeX, $centerBadgeY, 18, $elemColors['center'], $white, '2', $fontBold);
+    if (isset($byKey['border'])) gdDrawBadgeCircle($im, $borderBadgeX, $borderBadgeY, 18, $elemColors['border'], $white, '3', $fontBold);
+
+    // Bottom legend footer bar
+    gdDrawText(
+        $im,
+        11,
+        (int)($W / 2),
+        1152,
+        $textMuted,
+        'WoodCraft AI Combiner Reference  |  1 Frame Style  •  2 Center Carving  •  3 Border / Polish Finish  •  4 Top Arch & Crown  •  5 Panel Layout',
+        $fontReg,
+        'center'
+    );
+
+    $ok = imagepng($im, $guidePath, 5);
+    imagedestroy($im);
+    return (bool)$ok;
+}
+
+/**
  * High-clarity, zero-crop photorealistic door combiner & renderer for cPanel PHP + GD:
  *  1) Uses Gemini multimodal image AI if GEMINI_API_KEY is configured.
  *  2) Otherwise extracts the COMPLETE uncropped door/frame objects from the selected
@@ -1387,6 +1793,94 @@ function renderDoorPngPhp(array $opts): array {
             imagedestroy($canvas);
 
             imagepng($finalImg, $fullPath, 5);
+
+            // I) Compute exact normalized 0..1 architectural zone coordinates on the final HD door
+            $normBox = function (int $x, int $y, int $w, int $h) use ($trimX0, $trimY0, $trimW, $trimH): array {
+                $nx = max(0.0, min(0.95, ($x - $trimX0) / (float)$trimW));
+                $ny = max(0.0, min(0.95, ($y - $trimY0) / (float)$trimH));
+                $nw = max(0.04, min(1.0 - $nx, $w / (float)$trimW));
+                $nh = max(0.04, min(1.0 - $ny, $h / (float)$trimH));
+                return [
+                    'x' => round($nx, 4),
+                    'y' => round($ny, 4),
+                    'w' => round($nw, 4),
+                    'h' => round($nh, 4),
+                ];
+            };
+
+            $crownZoneH = max(48, ($baseLintelY - $finalTopY));
+            $frameTopY = $base['is_framed'] ? max($finalTopY + (int)round($crownZoneH * 0.85), $baseLintelY - 8) : $baseOuter['y'];
+            $centerInsetX = (int)round($baseInner['w'] * 0.08);
+            $centerInsetY = (int)round($baseInner['h'] * 0.08);
+            $borderStripW = max(24, (int)round($baseInner['w'] * 0.11));
+            $borderStripH = max(80, (int)round($baseInner['h'] * 0.34));
+
+            $elementRegions = [
+                'crown'  => $normBox($finalLeftX, $finalTopY, max(60, $finalRightX - $finalLeftX), $crownZoneH),
+                'frame'  => $normBox($baseMidLeftX, $frameTopY, max(60, $baseMidRightX - $baseMidLeftX), max(80, ($baseOuter['y'] + $baseOuter['h']) - $frameTopY)),
+                'panel'  => $normBox($baseInner['x'], $baseInner['y'], $baseInner['w'], $baseInner['h']),
+                'center' => $normBox(
+                    $baseInner['x'] + $centerInsetX,
+                    $baseInner['y'] + $centerInsetY,
+                    max(40, $baseInner['w'] - $centerInsetX * 2),
+                    max(60, $baseInner['h'] - $centerInsetY * 2)
+                ),
+                'border' => $normBox(
+                    $baseInner['x'] + $baseInner['w'] - (int)round($borderStripW * 0.55),
+                    $baseInner['y'] + $baseInner['h'] - $borderStripH - (int)round($baseInner['h'] * 0.08),
+                    $borderStripW,
+                    $borderStripH
+                ),
+            ];
+
+            // Build accurate source metadata lookup for all 5 combine elements
+            $designById = [];
+            foreach ($refDesigns as $d) {
+                $designById[(int)($d['id'] ?? 0)] = $d;
+            }
+            $buildBreakdownItem = function (int $num, string $key, string $label, string $colorHex, ?int $explicitId, int $fallbackId, string $desc) use ($designById): array {
+                $effectiveId = $explicitId ?? $fallbackId;
+                $d = $designById[$effectiveId] ?? ['id' => $effectiveId, 'title' => "Design #$effectiveId", 'image_url' => ''];
+                return [
+                    'number' => $num,
+                    'key' => $key,
+                    'label' => $label,
+                    'color' => $colorHex,
+                    'design_id' => $effectiveId,
+                    'design_title' => (string)($d['title'] ?? "Design #$effectiveId"),
+                    'design_image_url' => (string)($d['image_url'] ?? ''),
+                    'is_explicit' => ($explicitId !== null),
+                    'description' => $desc,
+                ];
+            };
+
+            $effectivePanelFallback = $panelId ?? $centerId ?? $baseId;
+            $effectiveCenterFallback = $centerId ?? $panelId ?? $baseId;
+
+            $elementBreakdown = [
+                $buildBreakdownItem(1, 'frame',  'Frame Style',            '#2563EB', $frameId,  $baseId,                 'Full outer wooden frame & left/right carved pillars'),
+                $buildBreakdownItem(2, 'center', 'Center Carving',         '#EA580C', $centerId, $effectiveCenterFallback, 'Main carving artwork inside the door leaf'),
+                $buildBreakdownItem(3, 'border', 'Border / Polish Finish', '#9333EA', $finishId, $baseId,                 "$polishShade wood tone, shine & inner border molding"),
+                $buildBreakdownItem(4, 'crown',  'Top Arch & Crown',       '#DC2626', $crownId,  $baseId,                 'Top arch, temple carving & crown header only'),
+                $buildBreakdownItem(5, 'panel',  'Panel Layout',           '#16A34A', $panelId,  $effectivePanelFallback, 'Full inner door shutter & panel layout'),
+            ];
+
+            // J) Render companion HD Pictorial Breakdown Guide PNG matching the reference diagram
+            $guideFilename = preg_replace('/\.png$/i', '-guide.png', $filename);
+            $guidePath = rtrim($outputDir, '/\\') . DIRECTORY_SEPARATOR . $guideFilename;
+            $thumbImgs = [];
+            foreach ($objs as $did => $o) {
+                $thumbImgs[$did] = $o['img'];
+            }
+            $guideOk = renderAnnotatedGuidePngPhp(
+                $finalImg,
+                $elementRegions,
+                $elementBreakdown,
+                $thumbImgs,
+                $category,
+                $guidePath
+            );
+
             imagedestroy($finalImg);
             foreach ($objs as $o) {
                 imagedestroy($o['img']);
@@ -1395,6 +1889,10 @@ function renderDoorPngPhp(array $opts): array {
             return [
                 'filename' => $filename,
                 'full_path' => $fullPath,
+                'guide_filename' => $guideOk ? $guideFilename : null,
+                'guide_full_path' => $guideOk ? $guidePath : null,
+                'element_regions' => $elementRegions,
+                'element_breakdown' => $elementBreakdown,
                 'engine' => 'php-real-photo-combiner',
             ];
         }

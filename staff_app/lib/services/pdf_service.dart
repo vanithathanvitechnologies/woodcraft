@@ -341,10 +341,27 @@ class PdfService {
     final logoImg = await _loadAssetLogo();
 
     final refList = (job['reference_designs'] as List?) ?? [];
-    final refImgs = <pw.MemoryImage>[];
-    for (final r in refList.take(3)) {
+    final refElements = (job['reference_elements'] as List?) ?? [];
+    final elementByDesignId = <int, String>{};
+    for (final el in refElements) {
+      if (el is Map) {
+        final did = int.tryParse('${el['design_id']}');
+        if (did != null) {
+          elementByDesignId[did] = (el['element'] ?? '').toString();
+        }
+      }
+    }
+    final refItems = <Map<String, dynamic>>[];
+    for (final r in refList.take(5)) {
       final img = await _loadNetworkImage(r['image_url']?.toString());
-      if (img != null) refImgs.add(img);
+      if (img != null) {
+        final rid = int.tryParse('${r['id']}') ?? -1;
+        refItems.add({
+          'img': img,
+          'title': (r['title'] ?? '').toString(),
+          'element': elementByDesignId[rid] ?? '',
+        });
+      }
     }
 
     await _openPreview(
@@ -507,26 +524,57 @@ class PdfService {
                   ),
                 ),
 
-              if (refImgs.isNotEmpty) ...[
+              if (refItems.isNotEmpty) ...[
                 pw.SizedBox(height: 12),
-                pw.Text('SOURCE REFERENCE DESIGNS',
+                pw.Text('SOURCE REFERENCE DESIGNS & STYLE MAPPING (UP TO 5)',
                     style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: isNarrow ? 9.5 : 11)),
                 pw.SizedBox(height: 8),
                 pw.Wrap(
                   spacing: 10,
                   runSpacing: 10,
-                  children: refImgs
-                      .map((img) => pw.Container(
-                            width: isNarrow ? 64 : 88,
-                            height: isNarrow ? 86 : 120,
+                  children: refItems.map((item) {
+                    final img = item['img'] as pw.MemoryImage;
+                    final elName = (item['element'] ?? '').toString();
+                    final title = (item['title'] ?? '').toString();
+                    final cardW = isNarrow ? 68.0 : 94.0;
+                    return pw.SizedBox(
+                      width: cardW,
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.center,
+                        children: [
+                          pw.Container(
+                            width: cardW,
+                            height: isNarrow ? 86 : 118,
                             padding: const pw.EdgeInsets.all(3),
                             decoration: pw.BoxDecoration(
                               color: PdfColors.white,
                               border: pw.Border.all(color: PdfColors.grey400),
                             ),
                             child: pw.Image(img, fit: pw.BoxFit.contain),
-                          ))
-                      .toList(),
+                          ),
+                          if (elName.isNotEmpty) ...[
+                            pw.SizedBox(height: 3),
+                            pw.Text(
+                              elName,
+                              textAlign: pw.TextAlign.center,
+                              style: pw.TextStyle(
+                                fontSize: isNarrow ? 7 : 8,
+                                fontWeight: pw.FontWeight.bold,
+                                color: PdfColor.fromHex('#6B3E1D'),
+                              ),
+                            ),
+                          ],
+                          if (title.isNotEmpty)
+                            pw.Text(
+                              title,
+                              maxLines: 2,
+                              textAlign: pw.TextAlign.center,
+                              style: pw.TextStyle(fontSize: isNarrow ? 6.5 : 7.5, color: PdfColors.grey700),
+                            ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
                 ),
               ],
               pw.SizedBox(height: 14),

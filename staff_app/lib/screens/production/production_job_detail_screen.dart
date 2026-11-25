@@ -4,6 +4,7 @@ import '../../core/app_theme.dart';
 import '../../core/constants.dart';
 import '../../services/api_service.dart';
 import '../../services/pdf_service.dart';
+import '../../widgets/door_pictorial_guide.dart';
 import '../../widgets/ui_kit.dart';
 
 class ProductionJobDetailScreen extends StatefulWidget {
@@ -384,44 +385,88 @@ class _ProductionJobDetailScreenState extends State<ProductionJobDetailScreen> {
               ),
             ),
 
-            // Reference Designs
+            // Reference Designs with assigned Combine Element badges (up to 5)
             if (refDesigns.isNotEmpty)
               UiKit.cardContainer(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    UiKit.sectionHeader(Icons.collections_rounded, 'Source Reference Designs'),
+                    UiKit.sectionHeader(Icons.collections_rounded, 'Source Reference Designs & Style Mapping'),
                     const SizedBox(height: 10),
                     SizedBox(
-                      height: 132,
+                      height: 158,
                       child: ListView.separated(
                         scrollDirection: Axis.horizontal,
                         itemCount: refDesigns.length,
                         separatorBuilder: (_, __) => const SizedBox(width: 10),
                         itemBuilder: (_, i) {
                           final r = refDesigns[i];
+                          final rId = int.tryParse('${r['id']}') ?? -1;
                           final rUrl = ApiService.instance.mediaUrl(r['image_url']?.toString());
+                          final refEls = (job['reference_elements'] as List?) ?? [];
+                          String? assignedEl;
+                          for (final el in refEls) {
+                            if (el is Map && int.tryParse('${el['design_id']}') == rId) {
+                              assignedEl = el['element']?.toString();
+                              break;
+                            }
+                          }
+                          final meta = assignedEl != null ? CombineElementMeta.forLabel(assignedEl) : null;
                           return GestureDetector(
                             onTap: () => _openZoomViewer(rUrl),
-                            child: Column(
-                              children: [
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(10),
-                                  child: Container(
-                                    width: 88,
-                                    height: 105,
-                                    padding: const EdgeInsets.all(3),
-                                    color: Colors.white,
-                                    child: Image.network(rUrl, fit: BoxFit.contain),
+                            child: Container(
+                              width: 108,
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: meta != null ? meta.color.withValues(alpha: 0.55) : AppTheme.border,
+                                  width: meta != null ? 1.6 : 1,
+                                ),
+                              ),
+                              child: Column(
+                                children: [
+                                  Expanded(
+                                    child: Stack(
+                                      fit: StackFit.expand,
+                                      children: [
+                                        Image.network(rUrl, fit: BoxFit.contain),
+                                        if (meta != null)
+                                          Positioned(
+                                            top: 0,
+                                            right: 0,
+                                            child: Container(
+                                              width: 20,
+                                              height: 20,
+                                              alignment: Alignment.center,
+                                              decoration: BoxDecoration(color: meta.color, shape: BoxShape.circle),
+                                              child: Text(
+                                                '${meta.number}',
+                                                style: const TextStyle(
+                                                    color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.w900),
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(height: 4),
-                                SizedBox(
-                                  width: 88,
-                                  child: Text('${r['title']}',
-                                      maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10.5)),
-                                ),
-                              ],
+                                  const SizedBox(height: 4),
+                                  if (meta != null)
+                                    Text(
+                                      meta.label,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: meta.color),
+                                    ),
+                                  Text(
+                                    '${r['title']}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 10, color: AppTheme.textMuted),
+                                  ),
+                                ],
+                              ),
                             ),
                           );
                         },
