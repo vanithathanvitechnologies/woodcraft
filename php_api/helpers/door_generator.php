@@ -248,6 +248,96 @@ function extractDoorObject(string $absPath, array $meta = []): ?array {
         }
     }
 
+    // Strip residual exterior cool-gray/blue wall cutout slivers (e.g. pale marble/wall strips
+    // left along the outer left, right, and top edges of catalog door photos)
+    if ($hasCleanBg) {
+        $bgInt = (clampByte($bg[0]) << 16) | (clampByte($bg[1]) << 8) | clampByte($bg[2]);
+        $isExteriorWallHalo = function (int $r, int $g, int $b) use ($bg): bool {
+            if (colorDist($r, $g, $b, $bg) <= 28.0) return true;
+            $lum = 0.299 * $r + 0.587 * $g + 0.114 * $b;
+            $sat = max($r, $g, $b) - min($r, $g, $b);
+            // Cool blue-gray wall / shadow sliver: blue clearly exceeds red, not dark wood
+            if ($b >= $r + 6 && $lum >= 55.0) return true;
+            // Bright or mid-light neutral gray/off-white wall cutout rim
+            if ($lum >= 162.0 && $sat <= 24.0 && $b >= $r - 5) return true;
+            return false;
+        };
+
+        $maxEdgeScanX = min(56, (int)round($ow * 0.14));
+        for ($oy = 0; $oy < $oh; $oy++) {
+            // Walk inward from left outer edge
+            $woodStreak = 0;
+            for ($ox = 0; $ox < $maxEdgeScanX; $ox++) {
+                $rgb = imagecolorat($obj, $ox, $oy);
+                if ($isExteriorWallHalo(($rgb >> 16) & 255, ($rgb >> 8) & 255, $rgb & 255)) {
+                    imagesetpixel($obj, $ox, $oy, $bgInt);
+                    $woodStreak = 0;
+                } else {
+                    $woodStreak++;
+                    if ($woodStreak >= 2) break;
+                }
+            }
+            // Walk inward from right outer edge
+            $woodStreak = 0;
+            for ($ox = $ow - 1; $ox >= max(0, $ow - $maxEdgeScanX); $ox--) {
+                $rgb = imagecolorat($obj, $ox, $oy);
+                if ($isExteriorWallHalo(($rgb >> 16) & 255, ($rgb >> 8) & 255, $rgb & 255)) {
+                    imagesetpixel($obj, $ox, $oy, $bgInt);
+                    $woodStreak = 0;
+                } else {
+                    $woodStreak++;
+                    if ($woodStreak >= 2) break;
+                }
+            }
+        }
+        // Walk downward from top outer edge to clear pale top wall/marble strips
+        $maxEdgeScanY = min(36, (int)round($oh * 0.08));
+        for ($ox = 0; $ox < $ow; $ox++) {
+            $woodStreak = 0;
+            for ($oy = 0; $oy < $maxEdgeScanY; $oy++) {
+                $rgb = imagecolorat($obj, $ox, $oy);
+                if ($isExteriorWallHalo(($rgb >> 16) & 255, ($rgb >> 8) & 255, $rgb & 255)) {
+                    imagesetpixel($obj, $ox, $oy, $bgInt);
+                    $woodStreak = 0;
+                } else {
+                    $woodStreak++;
+                    if ($woodStreak >= 2) break;
+                }
+            }
+        }
+
+        // Re-tighten crop bounds after stripping exterior cool-wall slivers so outer bounds hug real wood
+        $tL = $ow; $tR = 0; $tT = $oh; $tB = 0;
+        for ($oy = 0; $oy < $oh; $oy += 2) {
+            for ($ox = 0; $ox < $ow; $ox += 2) {
+                $rgb = imagecolorat($obj, $ox, $oy);
+                if (colorDist(($rgb >> 16) & 255, ($rgb >> 8) & 255, $rgb & 255, $bg) > 26.0) {
+                    if ($ox < $tL) $tL = $ox;
+                    if ($ox > $tR) $tR = $ox;
+                    if ($oy < $tT) $tT = $oy;
+                    if ($oy > $tB) $tB = $oy;
+                }
+            }
+        }
+        if ($tR - $tL > (int)($ow * 0.55) && $tB - $tT > (int)($oh * 0.65)) {
+            $tL = max(0, $tL - 1);
+            $tT = max(0, $tT - 1);
+            $tR = min($ow - 1, $tR + 1);
+            $tB = min($oh - 1, $tB + 1);
+            $nw = max(1, $tR - $tL + 1);
+            $nh = max(1, $tB - $tT + 1);
+            if ($nw < $ow || $nh < $oh) {
+                $trimmed = imagecreatetruecolor($nw, $nh);
+                imagealphablending($trimmed, true);
+                imagecopy($trimmed, $obj, 0, 0, $tL, $tT, $nw, $nh);
+                imagedestroy($obj);
+                $obj = $trimmed;
+                $ow = $nw;
+                $oh = $nh;
+            }
+        }
+    }
+
     // 3) Analyze structure: Framed Door (pillars + crown) vs Pure Shutter Slab vs Landscape Material
     $aspect = $ow / (float)$oh;
 
@@ -298,10 +388,15 @@ function extractDoorObject(string $absPath, array $meta = []): ?array {
         // Detect symmetric pillar width using recessed vertical shadow + horizontal gradient inside y=36%..82%
         $yScan0 = (int)round($oh * 0.36);
         $yScan1 = (int)round($oh * 0.82);
-        $bestPillarFrac = ($aspect >= 0.70) ? 0.21 : 0.185;
+        // Wide fluted double-door frames (aspect >= 0.74, e.g. #059) have sleeker side pillars (~11%–14%),
+        // while tall temple Nilai frames (#001, #020) have wider carved pillars (~19%–24%).
+        $priorCenter = ($aspect >= 0.74) ? 0.125 : 0.205;
+        $minPct = ($aspect >= 0.74) ? 9 : 14;
+        $maxPct = ($aspect >= 0.74) ? 20 : 28;
+        $bestPillarFrac = $priorCenter;
         $bestScore = -1e9;
 
-        for ($pct = 14; $pct <= 29; $pct++) {
+        for ($pct = $minPct; $pct <= $maxPct; $pct++) {
             $frac = $pct / 100.0;
             $xl = $midLeft + (int)round($midOuterW * $frac);
             $xr = $midRight - (int)round($midOuterW * $frac);
@@ -331,8 +426,8 @@ function extractDoorObject(string $absPath, array $meta = []): ?array {
                 $n++;
             }
             if ($n > 0) {
-                $prior = 1.0 - abs($frac - 0.20) * 1.4;
-                $score = (($darkSum / $n) * 0.45 + ($edgeSum / $n) * 1.15) * max(0.65, $prior);
+                $prior = 1.0 - abs($frac - $priorCenter) * 1.8;
+                $score = (($darkSum / $n) * 0.45 + ($edgeSum / $n) * 1.15) * max(0.60, $prior);
                 if ($score > $bestScore) {
                     $bestScore = $score;
                     $bestPillarFrac = $frac;
@@ -779,6 +874,73 @@ function drawStudioFloorShadow($canvas, int $leftX, int $rightX, int $bottomY): 
 }
 
 /**
+ * Enhances fine wood carving clarity, grain crispness, and brass highlight definition
+ * using an edge-masked studio unsharp filter (zero haloing on the white studio backdrop!).
+ */
+function applyHdWoodClarity($canvas, array $bounds, array $canvasBg): void {
+    if (!function_exists('imageconvolution')) return;
+
+    $cw = imagesx($canvas);
+    $ch = imagesy($canvas);
+    $x0 = max(0, (int)$bounds['x'] - 4);
+    $y0 = max(0, (int)$bounds['y'] - 4);
+    $x1 = min($cw - 1, (int)$bounds['x'] + (int)$bounds['w'] + 4);
+    $y1 = min($ch - 1, (int)$bounds['y'] + (int)$bounds['h'] + 4);
+    $rw = $x1 - $x0 + 1;
+    $rh = $y1 - $y0 + 1;
+    if ($rw < 20 || $rh < 20) return;
+
+    $sharp = imagecreatetruecolor($rw, $rh);
+    imagecopy($sharp, $canvas, 0, 0, $x0, $y0, $rw, $rh);
+
+    // Native C-level studio unsharp convolution kernel (preserves brightness, crisp carving relief)
+    $kernel = [
+        [ 0.0,  -0.55,  0.0],
+        [-0.55,  3.20, -0.55],
+        [ 0.0,  -0.55,  0.0],
+    ];
+    @imageconvolution($sharp, $kernel, 1.0, 0.0);
+
+    // Blend sharpened wood detail strictly inside wooden regions so outer white borders stay halo-free
+    for ($py = 0; $py < $rh; $py++) {
+        $cy = $y0 + $py;
+        for ($px = 0; $px < $rw; $px++) {
+            $cx = $x0 + $px;
+            $oRgb = imagecolorat($canvas, $cx, $cy);
+            $or = ($oRgb >> 16) & 255;
+            $og = ($oRgb >> 8) & 255;
+            $ob = $oRgb & 255;
+
+            $dist = colorDist($or, $og, $ob, $canvasBg);
+            if ($dist <= 34.0) continue;
+
+            // Smoothly ramp sharpening strength inside the door interior (zero halo on white border!)
+            $mask = smoothstep(34.0, 82.0, $dist) * 0.72;
+            if ($mask <= 0.01) continue;
+
+            $sRgb = imagecolorat($sharp, $px, $py);
+            $sr = ($sRgb >> 16) & 255;
+            $sg = ($sRgb >> 8) & 255;
+            $sb = $sRgb & 255;
+
+            // Blend sharpened pixels + gentle studio clarity micro-contrast (+5%)
+            $nr = $or * (1.0 - $mask) + $sr * $mask;
+            $ng = $og * (1.0 - $mask) + $sg * $mask;
+            $nb = $ob * (1.0 - $mask) + $sb * $mask;
+
+            $c = 1.0 + 0.055 * $mask;
+            $nr = clampByte((($nr - 115.0) * $c) + 115.0);
+            $ng = clampByte((($ng - 90.0) * $c) + 90.0);
+            $nb = clampByte((($nb - 65.0) * $c) + 65.0);
+
+            imagesetpixel($canvas, $cx, $cy, ($nr << 16) | ($ng << 8) | $nb);
+        }
+    }
+
+    imagedestroy($sharp);
+}
+
+/**
  * Optional Real Generative AI call via Google Gemini API (when GEMINI_API_KEY is set in config.php).
  * Explicitly mandates full-length uncropped framing with clean margins on all four sides.
  */
@@ -904,9 +1066,9 @@ function renderDoorPngPhp(array $opts): array {
         ];
     }
 
-    // 2. Zero-Crop High-Clarity PHP GD Real-Photo Compositor
-    $canvasW = 720;
-    $canvasH = 960;
+    // 2. Zero-Crop Full-HD Clarity PHP GD Real-Photo Compositor
+    $canvasW = 960;
+    $canvasH = 1280;
     $canvasBg = [255.0, 255.0, 255.0];
 
     if (!empty($refDesigns) && function_exists('imagecreatetruecolor') && function_exists('imagecreatefromstring')) {
@@ -972,10 +1134,10 @@ function renderDoorPngPhp(array $opts): array {
             $hasSeparateCrown = ($crownId !== null && $crownId !== $baseId && isset($objs[$crownId]));
             $crownAddsTopHeight = $hasSeparateCrown && !$base['is_framed'];
 
-            // Safe generous margins so 100% of the door & crown are visible (ZERO clipping!)
-            $padX = 48;
-            $padBottom = 46;
-            $padTop = $crownAddsTopHeight ? 175 : 54;
+            // Crisp, balanced margins so the HD door fills almost the entire frame with ZERO clipping
+            $padX = 36;
+            $padBottom = 38;
+            $padTop = $crownAddsTopHeight ? 230 : 38;
 
             $availW = $canvasW - $padX * 2;
             $availH = $canvasH - $padTop - $padBottom;
@@ -1202,11 +1364,30 @@ function renderDoorPngPhp(array $opts): array {
             ];
             applyPolishShadeGrading($canvas, $polishShade, $gradeBounds, $canvasBg, $finishWoodRgb);
 
-            // F) Subtle studio floor contact shadow directly under the door base
+            // F) Apply HD wood-grain sharpening & studio micro-clarity (halo-free!)
+            applyHdWoodClarity($canvas, $gradeBounds, $canvasBg);
+
+            // G) Subtle studio floor contact shadow directly under the door base
             drawStudioFloorShadow($canvas, $baseMidLeftX, $baseMidRightX, $baseOuter['y'] + $baseOuter['h']);
 
-            imagepng($canvas, $fullPath, 6);
+            // H) Tight studio crop around the rendered door (+ crisp 26px breathing margin)
+            //    so zero wasted whitespace shrinks the preview on screen!
+            $outMarginX = 28;
+            $outMarginTop = 26;
+            $outMarginBot = 32;
+            $trimX0 = max(0, $finalLeftX - $outMarginX);
+            $trimY0 = max(0, $finalTopY - $outMarginTop);
+            $trimX1 = min($canvasW - 1, $finalRightX + $outMarginX);
+            $trimY1 = min($canvasH - 1, $baseOuter['y'] + $baseOuter['h'] + $outMarginBot);
+            $trimW = max(120, $trimX1 - $trimX0 + 1);
+            $trimH = max(160, $trimY1 - $trimY0 + 1);
+
+            $finalImg = imagecreatetruecolor($trimW, $trimH);
+            imagecopy($finalImg, $canvas, 0, 0, $trimX0, $trimY0, $trimW, $trimH);
             imagedestroy($canvas);
+
+            imagepng($finalImg, $fullPath, 5);
+            imagedestroy($finalImg);
             foreach ($objs as $o) {
                 imagedestroy($o['img']);
             }

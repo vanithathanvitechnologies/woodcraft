@@ -175,7 +175,7 @@ class UiKit {
     );
   }
 
-  /// Opens a responsive full-size interactive zoom image popup (zero cropping).
+  /// Opens a responsive full-size HD interactive zoom image popup (zero cropping).
   static void showFullImagePopup(
     BuildContext context, {
     required String imageUrl,
@@ -185,52 +185,116 @@ class UiKit {
     String? badge,
   }) {
     if (imageUrl.isEmpty) return;
-    final size = MediaQuery.sizeOf(context);
-    final maxW = (size.width * 0.94).clamp(280.0, 960.0);
-    final maxH = (size.height * 0.90).clamp(320.0, 920.0);
-    final hasFooter = (title != null && title.isNotEmpty) ||
-        (subtitle != null && subtitle.isNotEmpty) ||
-        (priceText != null && priceText.isNotEmpty);
-
     showDialog<void>(
       context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.86),
-      builder: (ctx) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: maxW, maxHeight: maxH),
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.35),
-                  blurRadius: 28,
-                  offset: const Offset(0, 12),
-                ),
-              ],
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              mainAxisSize: MainAxisSize.max,
-              children: [
-                Expanded(
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      Container(
+      barrierColor: Colors.black.withValues(alpha: 0.88),
+      builder: (ctx) => _FullImagePopupDialog(
+        imageUrl: imageUrl,
+        title: title,
+        subtitle: subtitle,
+        priceText: priceText,
+        badge: badge,
+      ),
+    );
+  }
+}
+
+class _FullImagePopupDialog extends StatefulWidget {
+  final String imageUrl;
+  final String? title;
+  final String? subtitle;
+  final String? priceText;
+  final String? badge;
+
+  const _FullImagePopupDialog({
+    required this.imageUrl,
+    this.title,
+    this.subtitle,
+    this.priceText,
+    this.badge,
+  });
+
+  @override
+  State<_FullImagePopupDialog> createState() => _FullImagePopupDialogState();
+}
+
+class _FullImagePopupDialogState extends State<_FullImagePopupDialog> {
+  final TransformationController _transformCtrl = TransformationController();
+  double _zoom = 1.0;
+
+  @override
+  void dispose() {
+    _transformCtrl.dispose();
+    super.dispose();
+  }
+
+  void _setZoom(double nextZoom) {
+    final clamped = nextZoom.clamp(1.0, 5.0);
+    setState(() {
+      _zoom = clamped;
+      if (clamped == 1.0) {
+        _transformCtrl.value = Matrix4.identity();
+      } else {
+        _transformCtrl.value = Matrix4.diagonal3Values(clamped, clamped, 1.0);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final maxW = (size.width * 0.96).clamp(280.0, 1180.0);
+    final maxH = (size.height * 0.94).clamp(320.0, 1040.0);
+    final hasFooter = (widget.title != null && widget.title!.isNotEmpty) ||
+        (widget.subtitle != null && widget.subtitle!.isNotEmpty) ||
+        (widget.priceText != null && widget.priceText!.isNotEmpty);
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxW, maxHeight: maxH),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.38),
+                blurRadius: 28,
+                offset: const Offset(0, 12),
+              ),
+            ],
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            mainAxisSize: MainAxisSize.max,
+            children: [
+              Expanded(
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    GestureDetector(
+                      onDoubleTap: () => _setZoom(_zoom > 1.2 ? 1.0 : 2.5),
+                      child: Container(
                         color: Colors.white,
-                        padding: const EdgeInsets.all(14),
+                        padding: const EdgeInsets.all(10),
                         child: InteractiveViewer(
-                          minScale: 0.8,
+                          transformationController: _transformCtrl,
+                          minScale: 1.0,
                           maxScale: 5.0,
+                          onInteractionEnd: (_) {
+                            final scale = _transformCtrl.value.getMaxScaleOnAxis();
+                            if ((scale - _zoom).abs() > 0.05) {
+                              setState(() => _zoom = scale.clamp(1.0, 5.0));
+                            }
+                          },
                           child: Center(
                             child: Image.network(
-                              imageUrl,
+                              widget.imageUrl,
                               fit: BoxFit.contain,
                               filterQuality: FilterQuality.high,
+                              isAntiAlias: true,
                               loadingBuilder: (context, child, progress) {
                                 if (progress == null) return child;
                                 return const Center(child: CircularProgressIndicator());
@@ -246,96 +310,142 @@ class UiKit {
                           ),
                         ),
                       ),
-                      if (badge != null && badge.isNotEmpty)
-                        Positioned(
-                          top: 12,
-                          left: 12,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                            decoration: BoxDecoration(
-                              color: AppTheme.brass,
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            child: Text(
-                              badge,
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w800,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                        ),
+                    ),
+                    if (widget.badge != null && widget.badge!.isNotEmpty)
                       Positioned(
-                        top: 10,
-                        right: 10,
-                        child: IconButton.filled(
-                          style: IconButton.styleFrom(
-                            backgroundColor: Colors.black.withValues(alpha: 0.65),
-                            foregroundColor: Colors.white,
+                        top: 12,
+                        left: 12,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: AppTheme.brass,
+                            borderRadius: BorderRadius.circular(14),
                           ),
-                          tooltip: 'Close',
-                          onPressed: () => Navigator.pop(ctx),
-                          icon: const Icon(Icons.close_rounded, size: 22),
+                          child: Text(
+                            widget.badge!,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.white,
+                            ),
+                          ),
                         ),
                       ),
+                    Positioned(
+                      top: 10,
+                      right: 10,
+                      child: IconButton.filled(
+                        style: IconButton.styleFrom(
+                          backgroundColor: Colors.black.withValues(alpha: 0.68),
+                          foregroundColor: Colors.white,
+                        ),
+                        tooltip: 'Close',
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close_rounded, size: 22),
+                      ),
+                    ),
+                    Positioned(
+                      bottom: 12,
+                      right: 12,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.68),
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                              tooltip: 'Zoom Out',
+                              onPressed: _zoom > 1.05 ? () => _setZoom(_zoom - 0.6) : null,
+                              icon: const Icon(Icons.remove_rounded, size: 18, color: Colors.white),
+                            ),
+                            InkWell(
+                              onTap: () => _setZoom(1.0),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 6),
+                                child: Text(
+                                  '${(_zoom * 100).round()}%',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                              tooltip: 'Zoom In',
+                              onPressed: _zoom < 4.9 ? () => _setZoom(_zoom + 0.6) : null,
+                              icon: const Icon(Icons.add_rounded, size: 18, color: Colors.white),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (hasFooter)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+                  decoration: const BoxDecoration(
+                    color: AppTheme.bg,
+                    border: Border(top: BorderSide(color: AppTheme.border)),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (widget.title != null && widget.title!.isNotEmpty)
+                              Text(
+                                widget.title!,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 14.5,
+                                  color: AppTheme.woodDark,
+                                ),
+                              ),
+                            if (widget.subtitle != null && widget.subtitle!.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                widget.subtitle!,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      if (widget.priceText != null && widget.priceText!.isNotEmpty) ...[
+                        const SizedBox(width: 12),
+                        Text(
+                          widget.priceText!,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w900,
+                            fontSize: 16,
+                            color: AppTheme.woodPrimary,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
-                if (hasFooter)
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-                    decoration: const BoxDecoration(
-                      color: AppTheme.bg,
-                      border: Border(top: BorderSide(color: AppTheme.border)),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (title != null && title.isNotEmpty)
-                                Text(
-                                  title,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 14.5,
-                                    color: AppTheme.woodDark,
-                                  ),
-                                ),
-                              if (subtitle != null && subtitle.isNotEmpty) ...[
-                                const SizedBox(height: 2),
-                                Text(
-                                  subtitle,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                        if (priceText != null && priceText.isNotEmpty) ...[
-                          const SizedBox(width: 12),
-                          Text(
-                            priceText,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w900,
-                              fontSize: 16,
-                              color: AppTheme.woodPrimary,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-              ],
-            ),
+            ],
           ),
         ),
       ),

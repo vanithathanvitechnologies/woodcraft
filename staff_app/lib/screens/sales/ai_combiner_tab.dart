@@ -649,48 +649,91 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
                           style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.woodDark),
                         ),
                       ),
-                      UiKit.iconChip(Icons.zoom_in_rounded, 'Tap for Full Size', color: AppTheme.info),
+                      InkWell(
+                        borderRadius: BorderRadius.circular(20),
+                        onTap: () => UiKit.showFullImagePopup(
+                          context,
+                          imageUrl: ApiService.instance.mediaUrl(_aiImageUrl),
+                          title: 'AI Generated $_category Design',
+                          subtitle: '$_woodSpecies • $_polishShade • $_leafType',
+                          badge: 'HD PREVIEW',
+                        ),
+                        child: UiKit.iconChip(Icons.zoom_in_rounded, 'Tap for Full Size', color: AppTheme.info),
+                      ),
                     ],
                   ),
+                  const SizedBox(height: 12),
+                  LayoutBuilder(
+                    builder: (ctx, box) {
+                      final isWide = box.maxWidth > 620;
+                      final previewHeight = isWide ? 560.0 : 450.0;
+                      return MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: GestureDetector(
+                          onTap: () => UiKit.showFullImagePopup(
+                            context,
+                            imageUrl: ApiService.instance.mediaUrl(_aiImageUrl),
+                            title: 'AI Generated $_category Design',
+                            subtitle: '$_woodSpecies • $_polishShade • $_leafType',
+                            badge: 'HD PREVIEW',
+                          ),
+                          child: Container(
+                            width: double.infinity,
+                            padding: EdgeInsets.symmetric(horizontal: isWide ? 24 : 10, vertical: 16),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFAF6F0),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: AppTheme.border),
+                            ),
+                            child: Center(
+                              child: Container(
+                                height: previewHeight,
+                                constraints: const BoxConstraints(maxWidth: 520),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: AppTheme.border),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: AppTheme.woodDark.withValues(alpha: 0.08),
+                                      blurRadius: 18,
+                                      offset: const Offset(0, 6),
+                                    ),
+                                  ],
+                                ),
+                                child: Image.network(
+                                  ApiService.instance.mediaUrl(_aiImageUrl),
+                                  fit: BoxFit.contain,
+                                  filterQuality: FilterQuality.high,
+                                  isAntiAlias: true,
+                                  loadingBuilder: (context, child, progress) {
+                                    if (progress == null) return child;
+                                    return const Center(child: CircularProgressIndicator());
+                                  },
+                                  errorBuilder: (_, __, ___) => const Center(
+                                    child: Icon(Icons.broken_image_outlined, size: 48, color: AppTheme.textMuted),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                   const SizedBox(height: 10),
-                  MouseRegion(
-                    cursor: SystemMouseCursors.click,
-                    child: GestureDetector(
-                      onTap: () => UiKit.showFullImagePopup(
+                  Center(
+                    child: OutlinedButton.icon(
+                      onPressed: () => UiKit.showFullImagePopup(
                         context,
                         imageUrl: ApiService.instance.mediaUrl(_aiImageUrl),
                         title: 'AI Generated $_category Design',
                         subtitle: '$_woodSpecies • $_polishShade • $_leafType',
-                        badge: 'AI PREVIEW',
+                        badge: 'HD PREVIEW',
                       ),
-                      child: Container(
-                        width: double.infinity,
-                        constraints: const BoxConstraints(minHeight: 280, maxHeight: 420),
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: AppTheme.border),
-                        ),
-                        child: Image.network(
-                          ApiService.instance.mediaUrl(_aiImageUrl),
-                          fit: BoxFit.contain,
-                          filterQuality: FilterQuality.high,
-                          loadingBuilder: (context, child, progress) {
-                            if (progress == null) return child;
-                            return const SizedBox(
-                              height: 280,
-                              child: Center(child: CircularProgressIndicator()),
-                            );
-                          },
-                          errorBuilder: (_, __, ___) => const SizedBox(
-                            height: 200,
-                            child: Center(
-                              child: Icon(Icons.broken_image_outlined, size: 48, color: AppTheme.textMuted),
-                            ),
-                          ),
-                        ),
-                      ),
+                      icon: const Icon(Icons.fullscreen_rounded, size: 18),
+                      label: const Text('Open Full-Size HD Zoom'),
                     ),
                   ),
                   if (_aiPromptUsed != null) ...[
