@@ -160,6 +160,35 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
     });
   }
 
+  /// Assigns [newElement] cleanly to [designId] as the LATEST selection:
+  /// removes any earlier design holding the exact same element so designs
+  /// never stack or conflict on top of each other.
+  void _assignElement(int designId, String newElement) {
+    setState(() {
+      final duplicateIds = _selectedElements.entries
+          .where((e) => e.key != designId && e.value == newElement)
+          .map((e) => e.key)
+          .toList();
+      for (final oldId in duplicateIds) {
+        _selectedElements.remove(oldId);
+      }
+      // Move updated design to the end so backend strictly treats it as the latest choice
+      _selectedElements.remove(designId);
+      _selectedElements[designId] = newElement;
+    });
+  }
+
+  void _clearAllSelections() {
+    setState(() {
+      _selectedElements.clear();
+      _aiImageUrl = null;
+      _aiGuideImageUrl = null;
+      _aiPromptUsed = null;
+      _aiElementRegions = null;
+      _aiBreakdownItems = [];
+    });
+  }
+
   Map<String, Rect>? _parseElementRegions(dynamic raw) {
     if (raw is! Map) return null;
     final out = <String, Rect>{};
@@ -195,20 +224,36 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
     }
 
     // Local fallback when connected to an older API without element_breakdown
-    int? findId(bool Function(String low) test) {
-      for (final e in _selectedElements.entries) {
-        if (test(e.value.toLowerCase())) return e.key;
+    int? frameId;
+    int? centerId;
+    int? borderId;
+    int? crownId;
+    int? panelId;
+    int? latestLeafId;
+    String? latestLeafRole;
+
+    for (final e in _selectedElements.entries) {
+      final low = e.value.toLowerCase();
+      if (low.contains('frame')) {
+        frameId = e.key;
+      } else if (low.contains('arch') || low.contains('crown') || low.contains('top')) {
+        crownId = e.key;
+      } else if (low.contains('panel') || low.contains('layout')) {
+        panelId = e.key;
+        latestLeafId = e.key;
+        latestLeafRole = 'panel';
+      } else if (low.contains('center') || low.contains('carving')) {
+        centerId = e.key;
+        latestLeafId = e.key;
+        latestLeafRole = 'center';
+      } else if (low.contains('border') || low.contains('polish') || low.contains('finish')) {
+        borderId = e.key;
       }
-      return null;
     }
 
-    final frameId = findId((s) => s.contains('frame'));
-    final centerId = findId((s) => s.contains('center') || s.contains('carving'));
-    final borderId = findId((s) => s.contains('border') || s.contains('polish') || s.contains('finish'));
-    final crownId = findId((s) => s.contains('arch') || s.contains('crown') || s.contains('top'));
-    final panelId = findId((s) => s.contains('panel') || s.contains('layout'));
     final firstId = _selectedElements.keys.isNotEmpty ? _selectedElements.keys.first : 0;
-    final baseId = frameId ?? panelId ?? crownId ?? centerId ?? firstId;
+    final baseId = frameId ?? crownId ?? latestLeafId ?? firstId;
+    final effectiveLeafId = latestLeafId ?? baseId;
 
     PictorialElementItem makeItem(CombineElementMeta meta, int? explicitId, int fallbackId, String desc) {
       final did = explicitId ?? fallbackId;
@@ -228,10 +273,10 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
 
     return [
       makeItem(CombineElementMeta.all[0], frameId, baseId, 'Full outer wooden frame & left/right carved pillars'),
-      makeItem(CombineElementMeta.all[1], centerId, centerId ?? panelId ?? baseId, 'Main carving artwork inside the door leaf'),
+      makeItem(CombineElementMeta.all[1], latestLeafRole == 'center' ? centerId : null, effectiveLeafId, 'Main carving artwork inside the door leaf'),
       makeItem(CombineElementMeta.all[2], borderId, baseId, '$_polishShade wood tone, shine & inner border molding'),
       makeItem(CombineElementMeta.all[3], crownId, baseId, 'Curved top arch, temple carving & crown header only'),
-      makeItem(CombineElementMeta.all[4], panelId, panelId ?? centerId ?? baseId, 'Full inner door shutter & panel layout'),
+      makeItem(CombineElementMeta.all[4], latestLeafRole == 'panel' ? panelId : null, effectiveLeafId, 'Full inner door shutter & panel layout'),
     ];
   }
 
@@ -390,6 +435,17 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
                         style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.woodDark),
                       ),
                     ),
+                    if (_selectedElements.isNotEmpty)
+                      TextButton.icon(
+                        style: TextButton.styleFrom(
+                          foregroundColor: AppTheme.danger,
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        ),
+                        onPressed: _clearAllSelections,
+                        icon: const Icon(Icons.clear_all_rounded, size: 17),
+                        label: const Text('Clear', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                      ),
                     IconButton(
                       tooltip: 'Refresh Catalog',
                       onPressed: _loadCatalog,
@@ -643,8 +699,16 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
                               );
                             }).toList(),
                             onChanged: (v) {
-                              if (v != null) setState(() => _selectedElements[entry.key] = v);
+                              if (v != null) _assignElement(entry.key, v);
                             },
+                          ),
+                          IconButton(
+                            tooltip: 'Remove design',
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                            onPressed: () => setState(() => _selectedElements.remove(entry.key)),
+                            icon: const Icon(Icons.close_rounded, size: 17, color: Colors.black45),
                           ),
                         ],
                       ),

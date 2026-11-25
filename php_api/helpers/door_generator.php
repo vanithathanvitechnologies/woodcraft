@@ -874,6 +874,68 @@ function drawStudioFloorShadow($canvas, int $leftX, int $rightX, int $bottomY): 
 }
 
 /**
+ * Renders a photorealistic solid molded wooden Chowkhat / Nilai outer frame
+ * around $innerRect using $woodRgb (used when an unframed shutter is assigned
+ * as Frame Style alongside a different inner door leaf so zero old carvings
+ * ever overlap or peek behind the new door).
+ */
+function drawCleanSolidWoodFrame($canvas, array $outerRect, array $innerRect, array $woodRgb): void {
+    $ox1 = (int)$outerRect['x'];
+    $oy1 = (int)$outerRect['y'];
+    $ox2 = $ox1 + (int)$outerRect['w'] - 1;
+    $oy2 = $oy1 + (int)$outerRect['h'] - 1;
+
+    $ix1 = (int)$innerRect['x'];
+    $iy1 = (int)$innerRect['y'];
+    $ix2 = $ix1 + (int)$innerRect['w'] - 1;
+    $iy2 = $iy1 + (int)$innerRect['h'] - 1;
+
+    $cw = imagesx($canvas);
+    $ch = imagesy($canvas);
+
+    $fillGrainRect = function (int $x0, int $y0, int $x1, int $y1, bool $vertical) use ($canvas, $woodRgb, $cw, $ch): void {
+        $x0 = max(0, $x0); $y0 = max(0, $y0);
+        $x1 = min($cw - 1, $x1); $y1 = min($ch - 1, $y1);
+        $w = max(1, $x1 - $x0 + 1);
+        $h = max(1, $y1 - $y0 + 1);
+
+        for ($y = $y0; $y <= $y1; $y++) {
+            for ($x = $x0; $x <= $x1; $x++) {
+                // Subtle natural wood grain & gentle 3D cylindrical molding shading
+                $u = $vertical ? (($x - $x0) / (float)$w) : (($y - $y0) / (float)$h);
+                $v = $vertical ? ($y - $y0) : ($x - $x0);
+                // 3D stepped molding profile across rail width
+                $profile = 0.86 + 0.22 * sin($u * M_PI);
+                if ($u < 0.08 || $u > 0.92) $profile *= 0.72;
+                elseif (($u > 0.24 && $u < 0.30) || ($u > 0.70 && $u < 0.76)) $profile *= 0.80;
+
+                $gCoord = ($vertical ? $x : $y) * 0.42 + sin($v * 0.025) * 2.2;
+                $grain = sin($gCoord) * 7.5 + sin($gCoord * 2.4) * 3.0;
+
+                $r = clampByte($woodRgb[0] * $profile + $grain);
+                $g = clampByte($woodRgb[1] * $profile + $grain * 0.82);
+                $b = clampByte($woodRgb[2] * $profile + $grain * 0.65);
+                imagesetpixel($canvas, $x, $y, ($r << 16) | ($g << 8) | $b);
+            }
+        }
+    };
+
+    // Left jamb, Right jamb, and Top lintel rail (clean solid wood, ZERO overlap!)
+    $fillGrainRect($ox1, $oy1, $ix1, $oy2, true);
+    $fillGrainRect($ix2, $oy1, $ox2, $oy2, true);
+    $fillGrainRect($ox1, $oy1, $ox2, $iy1, false);
+
+    // Crisp outer & inner molding shadow lines
+    $darkCol = imagecolorallocate($canvas, clampByte($woodRgb[0] * 0.42), clampByte($woodRgb[1] * 0.42), clampByte($woodRgb[2] * 0.42));
+    $hiCol   = imagecolorallocate($canvas, clampByte($woodRgb[0] * 1.18), clampByte($woodRgb[1] * 1.18), clampByte($woodRgb[2] * 1.15));
+    imagerectangle($canvas, $ox1, $oy1, $ox2, $oy2, $darkCol);
+    imagerectangle($canvas, $ox1 + 1, $oy1 + 1, $ox2 - 1, $oy2 - 1, $darkCol);
+    imagerectangle($canvas, $ix1 - 1, $iy1 - 1, $ix2 + 1, $iy2, $darkCol);
+    imageline($canvas, $ox1 + 4, $oy1 + 4, $ox2 - 4, $oy1 + 4, $hiCol);
+    imageline($canvas, $ox1 + 4, $oy1 + 4, $ox1 + 4, $oy2 - 4, $hiCol);
+}
+
+/**
  * Enhances fine wood carving clarity, grain crispness, and brass highlight definition
  * using an edge-masked studio unsharp filter (zero haloing on the white studio backdrop!).
  */
@@ -1493,188 +1555,224 @@ function renderDoorPngPhp(array $opts): array {
 
         if (!empty($objs)) {
             $ids = array_keys($objs);
-            $elementMap = [];
+            $frameId = null;
+            $crownId = null;
+            $panelId = null;
+            $centerId = null;
+            $finishId = null;
+            $latestLeafId = null;
+            $latestLeafRole = null;
+
+            // Process elements strictly in selection/edit order so the LATEST selection always wins
             foreach ($refElements as $el) {
                 $did = (int)($el['design_id'] ?? 0);
                 $elName = strtolower(trim((string)($el['element'] ?? '')));
-                if (isset($objs[$did]) && $elName !== '') {
-                    $elementMap[$elName] = $did;
+                if (!isset($objs[$did]) || $elName === '') continue;
+
+                if (strpos($elName, 'frame') !== false) {
+                    $frameId = $did;
+                } elseif (strpos($elName, 'arch') !== false || strpos($elName, 'crown') !== false || strpos($elName, 'top') !== false) {
+                    $crownId = $did;
+                } elseif (strpos($elName, 'panel') !== false || strpos($elName, 'layout') !== false) {
+                    $panelId = $did;
+                    $latestLeafId = $did;
+                    $latestLeafRole = 'panel';
+                } elseif (strpos($elName, 'center') !== false || strpos($elName, 'carving') !== false || strpos($elName, 'medallion') !== false || strpos($elName, 'bell') !== false) {
+                    $centerId = $did;
+                    $latestLeafId = $did;
+                    $latestLeafRole = 'center';
+                } elseif (strpos($elName, 'polish') !== false || strpos($elName, 'finish') !== false || strpos($elName, 'border') !== false) {
+                    $finishId = $did;
                 }
             }
 
-            $findByKeyword = function (array $keywords) use ($elementMap): ?int {
-                foreach ($elementMap as $name => $did) {
-                    foreach ($keywords as $kw) {
-                        if (strpos($name, $kw) !== false) return $did;
-                    }
-                }
-                return null;
-            };
+            // ZERO-OVERLAP ARCHITECTURAL COMPOSITION:
+            //  1) If Frame Style is a REAL framed door with outer pillars (is_framed = true),
+            //     use its real carved pillars/frame as the base, and cleanly REPLACE 100% of
+            //     its inner doorway with ONLY the single latest inner shutter ($latestLeafId).
+            //  2) If Frame Style is an UNFRAMED shutter (e.g. #071) AND a different inner door
+            //     ($latestLeafId, e.g. #074) is selected: NEVER paste #074 on top of #071's
+            //     carvings! Instead, completely remove #071's face and build a clean solid
+            //     molded wooden frame in #071's exact wood finish surrounding #074 cleanly!
+            //  3) If no Frame Style was selected: prefer a real framed design (e.g. framed crown)
+            //     as outer frame; otherwise show ONLY the latest selected clean door ($latestLeafId)
+            //     with ZERO previous shutter left underneath!
+            $useCleanMoldedFrame = false;
+            $frameToneId = null;
 
-            $frameId  = $findByKeyword(['frame']);
-            $crownId  = $findByKeyword(['arch', 'crown', 'top']);
-            $panelId  = $findByKeyword(['panel', 'layout']);
-            $centerId = $findByKeyword(['center', 'carving', 'medallion', 'bell']);
-            $finishId = $findByKeyword(['polish', 'finish', 'border']);
-
-            // Architectural base selection:
-            // Frame Style is ALWAYS the outer structure; otherwise prefer a framed design,
-            // then Panel Layout / Center Carving / Crown / first selected design.
-            $baseId = $frameId;
-            if ($baseId === null && $panelId !== null && $objs[$panelId]['is_framed']) {
-                $baseId = $panelId;
-            }
-            if ($baseId === null && $crownId !== null && $objs[$crownId]['is_framed']) {
+            if ($frameId !== null && $objs[$frameId]['is_framed']) {
+                $baseId = $frameId;
+            } elseif ($frameId !== null && !$objs[$frameId]['is_framed'] && $latestLeafId !== null && $latestLeafId !== $frameId) {
+                // Unframed shutter assigned as Frame Style + a different inner leaf selected:
+                // Use the latest leaf cleanly inside a freshly crafted solid molded wood frame!
+                $baseId = $latestLeafId;
+                $useCleanMoldedFrame = true;
+                $frameToneId = $frameId;
+            } elseif ($frameId !== null) {
+                $baseId = $frameId;
+            } elseif ($crownId !== null && $objs[$crownId]['is_framed']) {
                 $baseId = $crownId;
-            }
-            if ($baseId === null && $centerId !== null && $objs[$centerId]['is_framed']) {
-                $baseId = $centerId;
-            }
-            if ($baseId === null) {
-                $baseId = $panelId ?? $centerId ?? $crownId ?? $ids[0];
+            } elseif ($latestLeafId !== null) {
+                $baseId = $latestLeafId;
+            } else {
+                $baseId = $crownId ?? $finishId ?? $ids[0];
             }
 
             $base = $objs[$baseId];
 
             // Determine whether a separate Top Arch & Crown will be mounted atop the base
             $hasSeparateCrown = ($crownId !== null && $crownId !== $baseId && isset($objs[$crownId]));
-            $crownAddsTopHeight = $hasSeparateCrown && !$base['is_framed'];
-
-            // Crisp, balanced margins so the HD door fills almost the entire frame with ZERO clipping
-            $padX = 36;
-            $padBottom = 38;
-            $padTop = $crownAddsTopHeight ? 230 : 38;
-
-            $availW = $canvasW - $padX * 2;
-            $availH = $canvasH - $padTop - $padBottom;
-
-            // Uniform contain-fit scale (NEVER stretches, NEVER cover-crops!)
-            $scale = min($availW / max(1.0, (float)$base['w']), $availH / max(1.0, (float)$base['h']));
-            $dstBaseW = max(40, (int)round($base['w'] * $scale));
-            $dstBaseH = max(40, (int)round($base['h'] * $scale));
-            $dstBaseX = (int)round(($canvasW - $dstBaseW) / 2.0);
-            // Sit nicely anchored near bottom margin when adding an overhead crown, else centered vertically
-            $dstBaseY = $crownAddsTopHeight
-                ? ($canvasH - $padBottom - $dstBaseH)
-                : ($padTop + (int)round(($availH - $dstBaseH) / 2.0));
+            $crownAddsTopHeight = $hasSeparateCrown && (!$base['is_framed'] || $useCleanMoldedFrame);
 
             // Create pure crisp white studio canvas
             $canvas = imagecreatetruecolor($canvasW, $canvasH);
             $bgCol = imagecolorallocate($canvas, (int)$canvasBg[0], (int)$canvasBg[1], (int)$canvasBg[2]);
             imagefilledrectangle($canvas, 0, 0, $canvasW, $canvasH, $bgCol);
 
-            // Place the full, uncropped base door cleanly onto the studio canvas
-            blitCleanObjectToCanvas($canvas, $base, $dstBaseX, $dstBaseY, $dstBaseW, $dstBaseH, $canvasBg);
+            // Crisp, balanced margins so the HD door fills almost the entire frame with ZERO clipping
+            $padX = 36;
+            $padBottom = 38;
+            $padTop = $crownAddsTopHeight ? 230 : 38;
+            $availW = $canvasW - $padX * 2;
+            $availH = $canvasH - $padTop - $padBottom;
 
-            // Map base's coordinates onto canvas coordinates
-            $mapRect = function (array $r) use ($dstBaseX, $dstBaseY, $scale): array {
-                return [
-                    'x' => $dstBaseX + (int)round($r['x'] * $scale),
-                    'y' => $dstBaseY + (int)round($r['y'] * $scale),
-                    'w' => max(20, (int)round($r['w'] * $scale)),
-                    'h' => max(20, (int)round($r['h'] * $scale)),
+            if ($useCleanMoldedFrame && !$base['is_landscape']) {
+                // Clean solid molded wood frame around the COMPLETE uncropped latest door leaf
+                // (ZERO old carvings or studs peeking out behind the door!)
+                $frameJambW = 54;
+                $frameHeadH = 44;
+                $innerAvailW = max(120, $availW - $frameJambW * 2);
+                $innerAvailH = max(180, $availH - $frameHeadH);
+                $scale = min($innerAvailW / max(1.0, (float)$base['w']), $innerAvailH / max(1.0, (float)$base['h']));
+
+                $leafW = max(60, (int)round($base['w'] * $scale));
+                $leafH = max(100, (int)round($base['h'] * $scale));
+                $dstBaseW = $leafW + $frameJambW * 2;
+                $dstBaseH = $leafH + $frameHeadH;
+                $dstBaseX = (int)round(($canvasW - $dstBaseW) / 2.0);
+                $dstBaseY = $crownAddsTopHeight
+                    ? ($canvasH - $padBottom - $dstBaseH)
+                    : ($padTop + (int)round(($availH - $dstBaseH) / 2.0));
+
+                $baseOuter = ['x' => $dstBaseX, 'y' => $dstBaseY, 'w' => $dstBaseW, 'h' => $dstBaseH];
+                $baseInner = [
+                    'x' => $dstBaseX + $frameJambW,
+                    'y' => $dstBaseY + $frameHeadH,
+                    'w' => $leafW,
+                    'h' => $leafH,
                 ];
-            };
+                $baseLintelY = $dstBaseY + $frameHeadH;
+                $baseMidLeftX = $dstBaseX;
+                $baseMidRightX = $dstBaseX + $dstBaseW;
+                $baseMidW = $dstBaseW;
 
-            $baseOuter = ['x' => $dstBaseX, 'y' => $dstBaseY, 'w' => $dstBaseW, 'h' => $dstBaseH];
-            $baseInner = $mapRect($base['inner']);
-            $baseLintelY = $dstBaseY + (int)round($base['crown_bottom_y'] * $scale);
-            $baseMidLeftX = $dstBaseX + (int)round($base['mid_left'] * $scale);
-            $baseMidRightX = $dstBaseX + (int)round($base['mid_right'] * $scale);
-            $baseMidW = max(60, $baseMidRightX - $baseMidLeftX);
+                // Sample rich wood color from the selected Frame Style design for the clean molded Chowkhat frame
+                $fToneObj = $objs[$frameToneId ?? $baseId];
+                $frameWoodRgb = sampleAverageWoodColor(
+                    $fToneObj['img'],
+                    0,
+                    0,
+                    $fToneObj['w'],
+                    $fToneObj['h'],
+                    $fToneObj['has_clean_bg'] ? $fToneObj['bg'] : null
+                );
 
-            // Sample target wood tone from the base door
-            $baseWoodRgb = sampleAverageWoodColor(
-                $canvas,
-                $baseOuter['x'],
-                $baseOuter['y'],
-                $baseOuter['w'],
-                $baseOuter['h'],
-                $canvasBg
-            );
+                drawCleanSolidWoodFrame($canvas, $baseOuter, $baseInner, $frameWoodRgb);
 
-            // Helper: choose source carving/shutter rect cleanly (NEVER slices single-leaf carvings in half!)
-            $getCleanShutterRect = function (int $srcId) use ($objs, $base): array {
-                $src = $objs[$srcId];
-                // If both base and source are pure shutters (no pillars), nest source's inner carved panel
-                // inside base's outer stiles/rails so borders don't double up!
-                if (!$base['is_framed'] && !$src['is_framed']) {
-                    return $src['inner'];
-                }
-                // Otherwise use the COMPLETE intact shutter leaf (96% of pure shutter, or inner leaf of framed door)
-                return $src['leaf'];
-            };
-
-            // A) Panel Layout — fits cleanly inside the base doorway opening
-            if ($panelId !== null && $panelId !== $baseId && isset($objs[$panelId]) && !$base['is_landscape']) {
-                $srcObj = $objs[$panelId];
-                $srcPanel = $getCleanShutterRect($panelId);
+                // Place the COMPLETE latest selected door leaf cleanly inside the molded frame
+                $baseWoodRgb = $frameWoodRgb;
                 compositeRegionClean(
                     $canvas,
-                    $srcObj['img'],
-                    $srcPanel,
+                    $base['img'],
+                    $base['leaf'],
                     $baseInner,
                     $baseWoodRgb,
-                    7,
+                    2,
                     true,
                     false,
-                    $srcObj['has_clean_bg'],
-                    $srcObj['bg'],
+                    $base['has_clean_bg'],
+                    $base['bg'],
                     false
                 );
-            }
+            } else {
+                // Standard contain-fit placement of the base architectural structure (NEVER cover-crops!)
+                $scale = min($availW / max(1.0, (float)$base['w']), $availH / max(1.0, (float)$base['h']));
+                $dstBaseW = max(40, (int)round($base['w'] * $scale));
+                $dstBaseH = max(40, (int)round($base['h'] * $scale));
+                $dstBaseX = (int)round(($canvasW - $dstBaseW) / 2.0);
+                $dstBaseY = $crownAddsTopHeight
+                    ? ($canvasH - $padBottom - $dstBaseH)
+                    : ($padTop + (int)round(($availH - $dstBaseH) / 2.0));
 
-            // B) Center Carving — fills doorway opening cleanly (or soft-blends into center if Panel Layout also set)
-            if ($centerId !== null && $centerId !== $baseId && isset($objs[$centerId]) && !$base['is_landscape']) {
-                $srcObj = $objs[$centerId];
-                if ($panelId === null || $panelId === $baseId || $panelId === $centerId) {
-                    $srcInner = $getCleanShutterRect($centerId);
+                // Place the full, uncropped base door cleanly onto the studio canvas
+                blitCleanObjectToCanvas($canvas, $base, $dstBaseX, $dstBaseY, $dstBaseW, $dstBaseH, $canvasBg);
+
+                $mapRect = function (array $r) use ($dstBaseX, $dstBaseY, $scale): array {
+                    return [
+                        'x' => $dstBaseX + (int)round($r['x'] * $scale),
+                        'y' => $dstBaseY + (int)round($r['y'] * $scale),
+                        'w' => max(20, (int)round($r['w'] * $scale)),
+                        'h' => max(20, (int)round($r['h'] * $scale)),
+                    ];
+                };
+
+                $baseOuter = ['x' => $dstBaseX, 'y' => $dstBaseY, 'w' => $dstBaseW, 'h' => $dstBaseH];
+                $baseInner = $mapRect($base['inner']);
+                $baseLintelY = $dstBaseY + (int)round($base['crown_bottom_y'] * $scale);
+                $baseMidLeftX = $dstBaseX + (int)round($base['mid_left'] * $scale);
+                $baseMidRightX = $dstBaseX + (int)round($base['mid_right'] * $scale);
+                $baseMidW = max(60, $baseMidRightX - $baseMidLeftX);
+
+                // Sample target wood tone from the base frame
+                $baseWoodRgb = sampleAverageWoodColor(
+                    $canvas,
+                    $baseOuter['x'],
+                    $baseOuter['y'],
+                    $baseOuter['w'],
+                    $baseOuter['h'],
+                    $canvasBg
+                );
+
+                // CLEAN 100% REPLACEMENT OF INNER DOORWAY OPENING:
+                // Only the SINGLE latest selected inner door ($latestLeafId) is placed inside $baseInner.
+                // Completely wipes the previous inner door first so ZERO old carvings ever bleed through!
+                if ($latestLeafId !== null && $latestLeafId !== $baseId && isset($objs[$latestLeafId]) && !$base['is_landscape']) {
+                    $srcObj = $objs[$latestLeafId];
+                    $srcLeafRect = $srcObj['leaf'];
+
+                    // Opaque wipe of the entire doorway opening so 0% of base's original inner door remains
+                    $wipeCol = imagecolorallocate(
+                        $canvas,
+                        clampByte($baseWoodRgb[0] * 0.48),
+                        clampByte($baseWoodRgb[1] * 0.48),
+                        clampByte($baseWoodRgb[2] * 0.48)
+                    );
+                    imagefilledrectangle(
+                        $canvas,
+                        $baseInner['x'],
+                        $baseInner['y'],
+                        $baseInner['x'] + $baseInner['w'] - 1,
+                        $baseInner['y'] + $baseInner['h'] - 1,
+                        $wipeCol
+                    );
+
                     compositeRegionClean(
                         $canvas,
                         $srcObj['img'],
-                        $srcInner,
+                        $srcLeafRect,
                         $baseInner,
                         $baseWoodRgb,
-                        7,
+                        2,
                         true,
                         false,
                         $srcObj['has_clean_bg'],
                         $srcObj['bg'],
                         false
                     );
-                } else {
-                    // Both Panel Layout & Center Carving from two different designs:
-                    // Blend center carving cleanly into the heart of the door leaf with soft rounded mask
-                    $cLeaf = $srcObj['leaf'];
-                    $srcMid = [
-                        'x' => $cLeaf['x'] + (int)round($cLeaf['w'] * 0.08),
-                        'y' => $cLeaf['y'] + (int)round($cLeaf['h'] * 0.10),
-                        'w' => max(40, (int)round($cLeaf['w'] * 0.84)),
-                        'h' => max(60, (int)round($cLeaf['h'] * 0.80)),
-                    ];
-                    $dstMid = [
-                        'x' => $baseInner['x'] + (int)round($baseInner['w'] * 0.10),
-                        'y' => $baseInner['y'] + (int)round($baseInner['h'] * 0.10),
-                        'w' => max(40, (int)round($baseInner['w'] * 0.80)),
-                        'h' => max(60, (int)round($baseInner['h'] * 0.80)),
-                    ];
-                    compositeRegionClean(
-                        $canvas,
-                        $srcObj['img'],
-                        $srcMid,
-                        $dstMid,
-                        $baseWoodRgb,
-                        18,
-                        false,
-                        false,
-                        $srcObj['has_clean_bg'],
-                        $srcObj['bg'],
-                        true
-                    );
                 }
             }
 
-            // C) Top Arch & Crown — cleanly replaces old crown or mounts flush atop unframed door, NEVER cut off!
+            // C) Top Arch & Crown — cleanly replaces old crown or mounts flush atop frame, NEVER cut off!
             $finalTopY = $baseOuter['y'];
             $finalLeftX = $baseOuter['x'];
             $finalRightX = $baseOuter['x'] + $baseOuter['w'];
@@ -1695,7 +1793,7 @@ function renderDoorPngPhp(array $opts): array {
                 $targetCrownW = min($canvasW - 44, (int)round($baseMidW * $crownOverhang));
                 $crownNaturalH = (int)round($targetCrownW * ($srcCrownH / max(1.0, (float)$cObj['w'])));
 
-                if ($base['is_framed']) {
+                if ($base['is_framed'] && !$useCleanMoldedFrame) {
                     // Erase the base's existing crown cleanly above the lintel line so no old cornice peeks out
                     imagefilledrectangle($canvas, 0, 0, $canvasW - 1, max(0, $baseLintelY - 2), $bgCol);
 
@@ -1704,7 +1802,6 @@ function renderDoorPngPhp(array $opts): array {
                     $maxCrownH = max(60, ($baseLintelY + $overlap) - 24);
                     $targetCrownH = min($maxCrownH, max(72, $crownNaturalH));
                     if ($crownNaturalH > $maxCrownH) {
-                        // Scale width slightly to preserve crown proportions without squashing or clipping
                         $ratio = $maxCrownH / (float)$crownNaturalH;
                         $targetCrownW = max((int)round($baseMidW * 0.98), (int)round($targetCrownW * max(0.85, $ratio)));
                     }
@@ -1712,8 +1809,8 @@ function renderDoorPngPhp(array $opts): array {
                     $dstCrownX = max(20, min($canvasW - 20 - $targetCrownW, $dstCrownX));
                     $dstCrownY = max(20, ($baseLintelY + $overlap) - $targetCrownH);
                 } else {
-                    // Mounting a crown directly on top of a pure door shutter
-                    $overlap = 10;
+                    // Mounting a crown cleanly flush on top of a clean molded frame or pure door shutter
+                    $overlap = $useCleanMoldedFrame ? 14 : 10;
                     $maxCrownH = max(60, ($dstBaseY + $overlap) - 24);
                     $targetCrownH = min($maxCrownH, max(72, $crownNaturalH));
                     $dstCrownX = (int)round(($dstBaseX + ($dstBaseW / 2.0)) - ($targetCrownW / 2.0));
@@ -1854,15 +1951,15 @@ function renderDoorPngPhp(array $opts): array {
                 ];
             };
 
-            $effectivePanelFallback = $panelId ?? $centerId ?? $baseId;
-            $effectiveCenterFallback = $centerId ?? $panelId ?? $baseId;
+            $effectiveLeafId = $latestLeafId ?? $baseId;
+            $effectiveFrameFallback = $frameToneId ?? $baseId;
 
             $elementBreakdown = [
-                $buildBreakdownItem(1, 'frame',  'Frame Style',            '#2563EB', $frameId,  $baseId,                 'Full outer wooden frame & left/right carved pillars'),
-                $buildBreakdownItem(2, 'center', 'Center Carving',         '#EA580C', $centerId, $effectiveCenterFallback, 'Main carving artwork inside the door leaf'),
-                $buildBreakdownItem(3, 'border', 'Border / Polish Finish', '#9333EA', $finishId, $baseId,                 "$polishShade wood tone, shine & inner border molding"),
-                $buildBreakdownItem(4, 'crown',  'Top Arch & Crown',       '#DC2626', $crownId,  $baseId,                 'Top arch, temple carving & crown header only'),
-                $buildBreakdownItem(5, 'panel',  'Panel Layout',           '#16A34A', $panelId,  $effectivePanelFallback, 'Full inner door shutter & panel layout'),
+                $buildBreakdownItem(1, 'frame',  'Frame Style',            '#2563EB', $frameId,        $effectiveFrameFallback, 'Full outer wooden frame & left/right carved pillars'),
+                $buildBreakdownItem(2, 'center', 'Center Carving',         '#EA580C', $latestLeafRole === 'center' ? $latestLeafId : null, $effectiveLeafId, 'Main carving artwork inside the door leaf'),
+                $buildBreakdownItem(3, 'border', 'Border / Polish Finish', '#9333EA', $finishId,       $effectiveFrameFallback, "$polishShade wood tone, shine & inner border molding"),
+                $buildBreakdownItem(4, 'crown',  'Top Arch & Crown',       '#DC2626', $crownId,        $baseId,                 'Top arch, temple carving & crown header only'),
+                $buildBreakdownItem(5, 'panel',  'Panel Layout',           '#16A34A', $latestLeafRole === 'panel' ? $latestLeafId : null,  $effectiveLeafId, 'Full inner door shutter & panel layout'),
             ];
 
             // J) Render companion HD Pictorial Breakdown Guide PNG matching the reference diagram
