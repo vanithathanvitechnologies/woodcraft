@@ -412,6 +412,32 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
       });
 
       final createdOrder = Map<String, dynamic>.from(res['order'] as Map);
+      final breakdownItems = _aiBreakdownItems.isNotEmpty ? _aiBreakdownItems : _buildBreakdownItems(null);
+      if ((createdOrder['element_breakdown'] as List?)?.isNotEmpty != true && breakdownItems.isNotEmpty) {
+        createdOrder['element_breakdown'] = breakdownItems
+            .map((it) => {
+                  'number': it.meta.number,
+                  'key': it.meta.key,
+                  'label': it.meta.label,
+                  'design_id': it.designId,
+                  'design_title': it.designTitle,
+                  'design_image_url': it.designImageUrl,
+                  'is_explicit': it.isExplicit,
+                  'description': it.description,
+                })
+            .toList();
+      }
+      if (createdOrder['element_regions'] == null && _aiElementRegions != null && _aiElementRegions!.isNotEmpty) {
+        createdOrder['element_regions'] = _aiElementRegions!.map(
+          (k, r) => MapEntry(k, {'x': r.left, 'y': r.top, 'w': r.width, 'h': r.height}),
+        );
+      }
+      createdOrder['output_aspect'] ??= _aiOutputAspect;
+      if ((createdOrder['ai_guide_image_url'] ?? '').toString().isEmpty &&
+          _aiGuideImageUrl != null &&
+          _aiGuideImageUrl!.isNotEmpty) {
+        createdOrder['ai_guide_image_url'] = _aiGuideImageUrl;
+      }
       if (!mounted) return;
 
       showDialog(

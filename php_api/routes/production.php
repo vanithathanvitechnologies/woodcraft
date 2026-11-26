@@ -45,7 +45,7 @@ function enrichRestrictedJobPhp(PDO $pdo, array $job): array {
     $job['reference_designs'] = $refDesigns;
     $job['stage_history'] = $hStmt->fetchAll();
     $job['progress_photos'] = $pStmt->fetchAll();
-    return $job;
+    return attachAiStyleGuideMetaPhp($job);
 }
 
 function handleProductionRoutes(string $method, array $segments): void {

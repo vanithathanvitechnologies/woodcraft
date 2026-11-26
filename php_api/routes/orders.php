@@ -33,7 +33,7 @@ function attachOrderRelationsPhp(PDO $pdo, array $order): array {
     $order['reference_designs'] = $refDesigns;
     $order['stage_history'] = $hStmt->fetchAll();
     $order['progress_photos'] = $pStmt->fetchAll();
-    return $order;
+    return attachAiStyleGuideMetaPhp($order);
 }
 
 function handleOrdersRoutes(string $method, array $segments): void {

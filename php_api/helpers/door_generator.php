@@ -2024,6 +2024,16 @@ function renderDoorPngPhp(array $opts): array {
             foreach ($objs as $did => $o) $thumbImgs[$did] = $o['img'];
             $guideOk = $gemIm ? renderAnnotatedGuidePngPhp($gemIm, $elementRegions, $elementBreakdown, $thumbImgs, $category, $guidePath) : false;
 
+            $outputAspect = round($gw / max(1.0, (float)$gh), 4);
+            $metaFilename = preg_replace('/\.png$/i', '-meta.json', $filename);
+            $metaPath = rtrim($outputDir, '/\\') . DIRECTORY_SEPARATOR . $metaFilename;
+            @file_put_contents($metaPath, json_encode([
+                'element_regions' => $elementRegions,
+                'element_breakdown' => $elementBreakdown,
+                'output_aspect' => $outputAspect,
+                'ai_guide_image_url' => $guideOk ? ('/uploads/ai-outputs/' . $guideFilename) : null,
+            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+
             if ($gemIm) imagedestroy($gemIm);
             foreach ($objs as $o) imagedestroy($o['img']);
 
@@ -2034,7 +2044,7 @@ function renderDoorPngPhp(array $opts): array {
                 'guide_full_path' => $guideOk ? $guidePath : null,
                 'element_regions' => $elementRegions,
                 'element_breakdown' => $elementBreakdown,
-                'output_aspect' => round($gw / max(1.0, (float)$gh), 4),
+                'output_aspect' => $outputAspect,
                 'engine' => 'gemini-multimodal-ai',
             ];
         }
@@ -2521,6 +2531,16 @@ function renderDoorPngPhp(array $opts): array {
                 $guidePath
             );
 
+            $outputAspect = round($trimW / max(1.0, (float)$trimH), 4);
+            $metaFilename = preg_replace('/\.png$/i', '-meta.json', $filename);
+            $metaPath = rtrim($outputDir, '/\\') . DIRECTORY_SEPARATOR . $metaFilename;
+            @file_put_contents($metaPath, json_encode([
+                'element_regions' => $elementRegions,
+                'element_breakdown' => $elementBreakdown,
+                'output_aspect' => $outputAspect,
+                'ai_guide_image_url' => $guideOk ? ('/uploads/ai-outputs/' . $guideFilename) : null,
+            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+
             imagedestroy($finalImg);
             foreach ($objs as $o) {
                 imagedestroy($o['img']);
@@ -2533,7 +2553,7 @@ function renderDoorPngPhp(array $opts): array {
                 'guide_full_path' => $guideOk ? $guidePath : null,
                 'element_regions' => $elementRegions,
                 'element_breakdown' => $elementBreakdown,
-                'output_aspect' => round($trimW / max(1.0, (float)$trimH), 4),
+                'output_aspect' => $outputAspect,
                 'engine' => 'php-real-photo-combiner',
             ];
         }

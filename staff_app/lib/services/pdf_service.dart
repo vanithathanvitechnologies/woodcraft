@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import '../widgets/door_pictorial_guide.dart';
 import 'api_service.dart';
 
 class PdfService {
@@ -72,7 +73,7 @@ class PdfService {
     final logoImg = await _loadAssetLogo();
 
     await _openPreview(
-      context: context,
+      context: context != null && context.mounted ? context : null,
       title: 'Customer Copy - ${order['job_id'] ?? ''}',
       fileName: 'Customer_Copy_${order['job_id']}.pdf',
       builder: (PdfPageFormat pageFormat) async {
@@ -333,263 +334,1212 @@ class PdfService {
   }
 
   /// 2. Workshop Job Sheet PDF (Privacy-Protected):
-  /// Includes ONLY Job ID, QR Code, Final Output Design, Reference Images, Dimensions,
-  /// Woodwork Specs, Workshop Notes, and Target Delivery Date.
+  /// Includes ONLY Job ID, QR Code, Final Output Design, Dimensions, Woodwork Specs,
+  /// Workshop Notes, Target Delivery Date, and the 5-Element Section Details Style Source Guide.
   /// STRICTLY EXCLUDES Customer Name, Mobile, Address, and Pricing!
   static Future<void> printWorkshopJobSheet(Map<String, dynamic> job, {BuildContext? context}) async {
-    final designImg = await _loadNetworkImage(job['ai_output_image_url']?.toString());
-    final logoImg = await _loadAssetLogo();
+    final breakdownItems = _resolveStyleGuideBreakdown(job);
 
-    final refList = (job['reference_designs'] as List?) ?? [];
-    final refElements = (job['reference_elements'] as List?) ?? [];
-    final elementByDesignId = <int, String>{};
-    for (final el in refElements) {
-      if (el is Map) {
-        final did = int.tryParse('${el['design_id']}');
-        if (did != null) {
-          elementByDesignId[did] = (el['element'] ?? '').toString();
-        }
-      }
-    }
-    final refItems = <Map<String, dynamic>>[];
-    for (final r in refList.take(5)) {
-      final img = await _loadNetworkImage(r['image_url']?.toString());
+    final uniqueSourceUrls = <String>{
+      for (final item in breakdownItems)
+        if (item.designImageUrl.isNotEmpty) item.designImageUrl,
+    }.toList();
+
+    final loadedImages = await Future.wait<pw.MemoryImage?>([
+      _loadNetworkImage(job['ai_output_image_url']?.toString()),
+      _loadAssetLogo(),
+      ...uniqueSourceUrls.map(_loadNetworkImage),
+    ]);
+
+    final designImg = loadedImages[0];
+    final logoImg = loadedImages[1];
+    final sourceImages = <String, pw.MemoryImage>{};
+    for (int i = 0; i < uniqueSourceUrls.length; i++) {
+      final img = loadedImages[i + 2];
       if (img != null) {
-        final rid = int.tryParse('${r['id']}') ?? -1;
-        refItems.add({
-          'img': img,
-          'title': (r['title'] ?? '').toString(),
-          'element': elementByDesignId[rid] ?? '',
-        });
+        sourceImages[uniqueSourceUrls[i]] = img;
       }
     }
 
     await _openPreview(
-      context: context,
+      context: context != null && context.mounted ? context : null,
       title: 'Workshop Sheet - ${job['job_id'] ?? ''}',
       fileName: 'Workshop_Job_Sheet_${job['job_id']}.pdf',
-      builder: (PdfPageFormat pageFormat) async {
-        final doc = pw.Document();
-        final isNarrow = pageFormat.width < 420;
-        final margin = isNarrow ? 10.0 : 24.0;
-        final contentWidth = (pageFormat.width - margin * 2).clamp(160.0, 800.0);
+      builder: (PdfPageFormat pageFormat) => buildWorkshopJobSheetPdf(
+        job,
+        pageFormat: pageFormat,
+        designImg: designImg,
+        logoImg: logoImg,
+        sourceImages: sourceImages,
+      ),
+    );
+  }
 
-        doc.addPage(
-          pw.MultiPage(
-            pageFormat: pageFormat,
-            margin: pw.EdgeInsets.all(margin),
-            build: (context) => [
-              pw.Container(
-                width: double.infinity,
-                padding: pw.EdgeInsets.all(isNarrow ? 10 : 14),
-                decoration: pw.BoxDecoration(
-                  color: PdfColor.fromHex('#261B12'),
-                  borderRadius: pw.BorderRadius.circular(8),
-                ),
-                child: pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  crossAxisAlignment: pw.CrossAxisAlignment.center,
-                  children: [
-                    pw.Expanded(
-                      child: pw.Row(
-                        children: [
-                          if (logoImg != null) ...[
-                            pw.Container(
-                              width: isNarrow ? 58 : 78,
-                              height: isNarrow ? 24 : 30,
-                              padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                              decoration: pw.BoxDecoration(
-                                color: PdfColors.white,
-                                borderRadius: pw.BorderRadius.circular(5),
-                              ),
-                              child: pw.Image(logoImg, fit: pw.BoxFit.contain),
-                            ),
-                            pw.SizedBox(width: 8),
-                          ],
-                          pw.Expanded(
-                            child: pw.Column(
-                              crossAxisAlignment: pw.CrossAxisAlignment.start,
-                              children: [
-                                pw.Text('WORKSHOP TECHNICAL JOB SHEET',
-                                    style: pw.TextStyle(
-                                        color: PdfColors.white,
-                                        fontSize: isNarrow ? 11 : 15,
-                                        fontWeight: pw.FontWeight.bold)),
-                                pw.Text('PRODUCTION COPY - TECHNICAL SPECS ONLY',
-                                    style: pw.TextStyle(
-                                        color: PdfColor.fromHex('#D4AF37'), fontSize: isNarrow ? 7.5 : 9.5)),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    pw.SizedBox(width: 8),
-                    pw.BarcodeWidget(
-                      barcode: pw.Barcode.qrCode(),
-                      data: '${job['job_id'] ?? ''}',
-                      width: isNarrow ? 42 : 52,
-                      height: isNarrow ? 42 : 52,
-                      color: PdfColors.white,
-                    ),
-                  ],
-                ),
-              ),
-              pw.SizedBox(height: 12),
+  /// Builds the Workshop Technical Job Sheet PDF bytes for any [PdfPageFormat].
+  static Future<Uint8List> buildWorkshopJobSheetPdf(
+    Map<String, dynamic> job, {
+    required PdfPageFormat pageFormat,
+    pw.MemoryImage? designImg,
+    pw.MemoryImage? logoImg,
+    Map<String, pw.MemoryImage> sourceImages = const {},
+  }) async {
+    final breakdownItems = _resolveStyleGuideBreakdown(job);
+    final regions = _resolveStyleGuideRegions(job);
 
-              pw.Wrap(
-                spacing: 12,
-                runSpacing: 4,
-                alignment: pw.WrapAlignment.spaceBetween,
+    // Center image for the Style Source Guide: final combined door, or fallback to base source image
+    pw.MemoryImage? guideDoorImg = designImg;
+    if (guideDoorImg == null && breakdownItems.isNotEmpty) {
+      for (final item in breakdownItems) {
+        final candidate = sourceImages[item.designImageUrl];
+        if (candidate != null) {
+          guideDoorImg = candidate;
+          break;
+        }
+      }
+    }
+
+    final rawAspect = (job['output_aspect'] as num?)?.toDouble();
+    final double doorAspect;
+    if (rawAspect != null && rawAspect > 0) {
+      doorAspect = rawAspect.clamp(0.45, 1.35);
+    } else if (guideDoorImg != null && (guideDoorImg.width ?? 0) > 0 && (guideDoorImg.height ?? 0) > 0) {
+      doorAspect = (guideDoorImg.width! / guideDoorImg.height!).clamp(0.45, 1.35);
+    } else {
+      doorAspect = 0.72;
+    }
+
+    final doc = pw.Document();
+    final isNarrow = pageFormat.width < 420;
+    final margin = isNarrow ? 10.0 : 24.0;
+    final contentWidth = (pageFormat.width - margin * 2).clamp(160.0, 800.0);
+    final categoryLabel = _sanitizePdfText((job['woodwork_category'] ?? 'Door').toString().trim());
+
+    final pageChildren = <pw.Widget>[
+      pw.Container(
+        width: double.infinity,
+        padding: pw.EdgeInsets.all(isNarrow ? 10 : 14),
+        decoration: pw.BoxDecoration(
+          color: PdfColor.fromHex('#261B12'),
+          borderRadius: pw.BorderRadius.circular(8),
+        ),
+        child: pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: pw.CrossAxisAlignment.center,
+          children: [
+            pw.Expanded(
+              child: pw.Row(
                 children: [
-                  pw.Text('JOB ID: ${job['job_id'] ?? ''}',
-                      style: pw.TextStyle(fontSize: isNarrow ? 11 : 14, fontWeight: pw.FontWeight.bold)),
-                  pw.Text('TARGET DELIVERY: ${job['expected_delivery_date'] ?? ''} (${job['priority'] ?? 'Normal'})',
-                      style: pw.TextStyle(
-                          fontSize: isNarrow ? 9.5 : 11.5,
-                          fontWeight: pw.FontWeight.bold,
-                          color: PdfColors.red800)),
-                ],
-              ),
-              pw.Divider(),
-              pw.SizedBox(height: 8),
-
-              if (isNarrow) ...[
-                if (designImg != null) ...[
-                  pw.Center(
-                    child: pw.Container(
-                      width: (contentWidth * 0.80).clamp(110.0, 200.0),
-                      height: (contentWidth * 1.06).clamp(150.0, 265.0),
-                      padding: const pw.EdgeInsets.all(4),
+                  if (logoImg != null) ...[
+                    pw.Container(
+                      width: isNarrow ? 58 : 78,
+                      height: isNarrow ? 24 : 30,
+                      padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                       decoration: pw.BoxDecoration(
                         color: PdfColors.white,
-                        border: pw.Border.all(color: PdfColors.black, width: 1.5),
+                        borderRadius: pw.BorderRadius.circular(5),
                       ),
-                      child: pw.Image(designImg, fit: pw.BoxFit.contain),
+                      child: pw.Center(child: pw.Image(logoImg, fit: pw.BoxFit.contain)),
                     ),
-                  ),
-                  pw.SizedBox(height: 10),
-                ],
-                pw.Text('TECHNICAL MEASUREMENTS & SPECS',
-                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10)),
-                pw.SizedBox(height: 6),
-                ..._workshopSpecRows(job, compact: true),
-              ] else
-                pw.Row(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    if (designImg != null)
-                      pw.Container(
-                        width: 185,
-                        height: 255,
-                        padding: const pw.EdgeInsets.all(4),
-                        decoration: pw.BoxDecoration(
-                          color: PdfColors.white,
-                          border: pw.Border.all(color: PdfColors.black, width: 1.5),
-                        ),
-                        child: pw.Image(designImg, fit: pw.BoxFit.contain),
-                      ),
-                    if (designImg != null) pw.SizedBox(width: 16),
-                    pw.Expanded(
-                      child: pw.Column(
-                        crossAxisAlignment: pw.CrossAxisAlignment.start,
-                        children: [
-                          pw.Text('TECHNICAL MEASUREMENTS & SPECS',
-                              style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 11.5)),
-                          pw.SizedBox(height: 8),
-                          ..._workshopSpecRows(job, compact: false),
-                        ],
-                      ),
-                    ),
+                    pw.SizedBox(width: 8),
                   ],
-                ),
-              pw.SizedBox(height: 12),
-
-              if ((job['workshop_notes'] ?? '').toString().isNotEmpty)
-                pw.Container(
-                  width: double.infinity,
-                  padding: const pw.EdgeInsets.all(10),
-                  decoration: pw.BoxDecoration(
-                    color: PdfColors.amber50,
-                    border: pw.Border.all(color: PdfColors.amber700),
-                  ),
-                  child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Text('WORKSHOP NOTES:',
-                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: isNarrow ? 9 : 10)),
-                      pw.SizedBox(height: 4),
-                      pw.Text('${job['workshop_notes']}', style: pw.TextStyle(fontSize: isNarrow ? 8.5 : 10)),
-                    ],
-                  ),
-                ),
-
-              if (refItems.isNotEmpty) ...[
-                pw.SizedBox(height: 12),
-                pw.Text('SOURCE REFERENCE DESIGNS & STYLE MAPPING (UP TO 5)',
-                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: isNarrow ? 9.5 : 11)),
-                pw.SizedBox(height: 8),
-                pw.Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: refItems.map((item) {
-                    final img = item['img'] as pw.MemoryImage;
-                    final elName = (item['element'] ?? '').toString();
-                    final title = (item['title'] ?? '').toString();
-                    final cardW = isNarrow ? 68.0 : 94.0;
-                    return pw.SizedBox(
-                      width: cardW,
-                      child: pw.Column(
-                        crossAxisAlignment: pw.CrossAxisAlignment.center,
-                        children: [
-                          pw.Container(
-                            width: cardW,
-                            height: isNarrow ? 86 : 118,
-                            padding: const pw.EdgeInsets.all(3),
-                            decoration: pw.BoxDecoration(
-                              color: PdfColors.white,
-                              border: pw.Border.all(color: PdfColors.grey400),
-                            ),
-                            child: pw.Image(img, fit: pw.BoxFit.contain),
+                  pw.Expanded(
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text(
+                          'WORKSHOP TECHNICAL JOB SHEET',
+                          style: pw.TextStyle(
+                            color: PdfColors.white,
+                            fontSize: isNarrow ? 11 : 15,
+                            fontWeight: pw.FontWeight.bold,
                           ),
-                          if (elName.isNotEmpty) ...[
-                            pw.SizedBox(height: 3),
-                            pw.Text(
-                              elName,
-                              textAlign: pw.TextAlign.center,
-                              style: pw.TextStyle(
-                                fontSize: isNarrow ? 7 : 8,
-                                fontWeight: pw.FontWeight.bold,
-                                color: PdfColor.fromHex('#6B3E1D'),
-                              ),
-                            ),
-                          ],
-                          if (title.isNotEmpty)
-                            pw.Text(
-                              title,
-                              maxLines: 2,
-                              textAlign: pw.TextAlign.center,
-                              style: pw.TextStyle(fontSize: isNarrow ? 6.5 : 7.5, color: PdfColors.grey700),
-                            ),
-                        ],
-                      ),
-                    );
-                  }).toList(),
+                        ),
+                        pw.Text(
+                          'PRODUCTION COPY - TECHNICAL SPECS ONLY',
+                          style: pw.TextStyle(
+                            color: PdfColor.fromHex('#D4AF37'),
+                            fontSize: isNarrow ? 7.5 : 9.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            pw.SizedBox(width: 8),
+            pw.BarcodeWidget(
+              barcode: pw.Barcode.qrCode(),
+              data: '${job['job_id'] ?? ''}',
+              width: isNarrow ? 42 : 52,
+              height: isNarrow ? 42 : 52,
+              color: PdfColors.white,
+            ),
+          ],
+        ),
+      ),
+      pw.SizedBox(height: 10),
+
+      pw.Wrap(
+        spacing: 12,
+        runSpacing: 4,
+        alignment: pw.WrapAlignment.spaceBetween,
+        children: [
+          pw.Text(
+            'JOB ID: ${_sanitizePdfText('${job['job_id'] ?? ''}')}',
+            style: pw.TextStyle(fontSize: isNarrow ? 11 : 14, fontWeight: pw.FontWeight.bold),
+          ),
+          pw.Text(
+            'TARGET DELIVERY: ${_sanitizePdfText('${job['expected_delivery_date'] ?? ''} (${job['priority'] ?? 'Normal'})')}',
+            style: pw.TextStyle(
+              fontSize: isNarrow ? 9.5 : 11.5,
+              fontWeight: pw.FontWeight.bold,
+              color: PdfColors.red800,
+            ),
+          ),
+        ],
+      ),
+      pw.Divider(),
+      pw.SizedBox(height: 6),
+
+      if (isNarrow) ...[
+        if (designImg != null) ...[
+          pw.Center(
+            child: pw.Container(
+              width: (contentWidth * 0.80).clamp(110.0, 200.0),
+              height: (contentWidth * 1.06).clamp(150.0, 265.0),
+              padding: const pw.EdgeInsets.all(4),
+              decoration: pw.BoxDecoration(
+                color: PdfColors.white,
+                border: pw.Border.all(color: PdfColors.black, width: 1.5),
+              ),
+              child: pw.Center(child: pw.Image(designImg, fit: pw.BoxFit.contain)),
+            ),
+          ),
+          pw.SizedBox(height: 10),
+        ],
+        pw.Text(
+          'TECHNICAL MEASUREMENTS & SPECS',
+          style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10),
+        ),
+        pw.SizedBox(height: 6),
+        ..._workshopSpecRows(job, compact: true),
+      ] else
+        pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            if (designImg != null)
+              pw.Container(
+                width: 185,
+                height: 248,
+                padding: const pw.EdgeInsets.all(4),
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.white,
+                  border: pw.Border.all(color: PdfColors.black, width: 1.5),
                 ),
-              ],
-              pw.SizedBox(height: 14),
+                child: pw.Center(child: pw.Image(designImg, fit: pw.BoxFit.contain)),
+              ),
+            if (designImg != null) pw.SizedBox(width: 16),
+            pw.Expanded(
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text(
+                    'TECHNICAL MEASUREMENTS & SPECS',
+                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 11.5),
+                  ),
+                  pw.SizedBox(height: 7),
+                  ..._workshopSpecRows(job, compact: false),
+                ],
+              ),
+            ),
+          ],
+        ),
+
+      if ((job['workshop_notes'] ?? '').toString().trim().isNotEmpty) ...[
+        pw.SizedBox(height: 10),
+        pw.Container(
+          width: double.infinity,
+          padding: const pw.EdgeInsets.all(9),
+          decoration: pw.BoxDecoration(
+            color: PdfColors.amber50,
+            border: pw.Border.all(color: PdfColors.amber700),
+          ),
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
               pw.Text(
-                'Scan the QR code in the Production Team App to update workshop stage.',
-                style: pw.TextStyle(fontSize: isNarrow ? 8 : 9, color: PdfColors.grey700),
+                'WORKSHOP NOTES:',
+                style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: isNarrow ? 9 : 10),
+              ),
+              pw.SizedBox(height: 3),
+              pw.Text(
+                _sanitizePdfText('${job['workshop_notes']}'),
+                style: pw.TextStyle(fontSize: isNarrow ? 8.5 : 9.5),
               ),
             ],
           ),
-        );
+        ),
+      ],
 
-        final Uint8List bytes = await doc.save();
-        return bytes;
-      },
+      // Section Details - Style Source Guide (5 Combine Elements Pictorial Breakdown)
+      if (breakdownItems.isNotEmpty) ...[
+        pw.SizedBox(height: 10),
+        if (isNarrow)
+          ..._buildStyleSourceGuideCompact(
+            category: categoryLabel.isEmpty ? 'Door' : categoryLabel,
+            contentWidth: contentWidth,
+            doorImg: guideDoorImg,
+            doorAspect: doorAspect,
+            items: breakdownItems,
+            regions: regions,
+            sourceImages: sourceImages,
+          )
+        else
+          _buildStyleSourceGuideWide(
+            category: categoryLabel.isEmpty ? 'Door' : categoryLabel,
+            contentWidth: contentWidth,
+            doorImg: guideDoorImg,
+            doorAspect: doorAspect,
+            items: breakdownItems,
+            regions: regions,
+            sourceImages: sourceImages,
+          ),
+      ],
+
+      pw.SizedBox(height: 10),
+      pw.Text(
+        'Scan the QR code in the Production Team App to update workshop stage.',
+        style: pw.TextStyle(fontSize: isNarrow ? 8 : 8.5, color: PdfColors.grey700),
+      ),
+    ];
+
+    if (pageFormat.height.isFinite) {
+      doc.addPage(
+        pw.MultiPage(
+          pageFormat: pageFormat,
+          margin: pw.EdgeInsets.all(margin),
+          build: (context) => pageChildren,
+        ),
+      );
+    } else {
+      doc.addPage(
+        pw.Page(
+          pageFormat: pageFormat,
+          margin: pw.EdgeInsets.all(margin),
+          build: (context) => pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: pageChildren,
+          ),
+        ),
+      );
+    }
+
+    final Uint8List bytes = await doc.save();
+    return bytes;
+  }
+
+  static String _sanitizePdfText(String input) {
+    return input
+        .replaceAll('\u2014', '-')
+        .replaceAll('\u2013', '-')
+        .replaceAll('\u2022', '|')
+        .replaceAll('\u00D7', 'x')
+        .replaceAll('\u2018', "'")
+        .replaceAll('\u2019', "'")
+        .replaceAll('\u201C', '"')
+        .replaceAll('\u201D', '"')
+        .replaceAll('\u20B9', 'Rs. ')
+        .replaceAll('\u00A0', ' ');
+  }
+
+  static PdfColor _pdfColorForElementKey(String key) {
+    switch (key) {
+      case 'frame':
+        return PdfColor.fromHex('#2563EB'); // 1 Blue
+      case 'center':
+        return PdfColor.fromHex('#EA580C'); // 2 Orange
+      case 'border':
+        return PdfColor.fromHex('#9333EA'); // 3 Purple
+      case 'crown':
+        return PdfColor.fromHex('#DC2626'); // 4 Red
+      case 'panel':
+        return PdfColor.fromHex('#16A34A'); // 5 Green
+      default:
+        return PdfColor.fromHex('#2563EB');
+    }
+  }
+
+  static Map<String, _PdfGuideRect> _resolveStyleGuideRegions(Map<String, dynamic> job) {
+    const defaults = <String, _PdfGuideRect>{
+      'crown': _PdfGuideRect(0.03, 0.02, 0.94, 0.16),
+      'frame': _PdfGuideRect(0.05, 0.17, 0.90, 0.80),
+      'panel': _PdfGuideRect(0.16, 0.18, 0.68, 0.77),
+      'center': _PdfGuideRect(0.22, 0.24, 0.56, 0.64),
+      'border': _PdfGuideRect(0.80, 0.62, 0.09, 0.27),
+    };
+    final raw = job['element_regions'];
+    if (raw is! Map) return defaults;
+
+    final resolved = Map<String, _PdfGuideRect>.from(defaults);
+    raw.forEach((key, val) {
+      if (val is Map) {
+        final x = (val['x'] as num?)?.toDouble();
+        final y = (val['y'] as num?)?.toDouble();
+        final w = (val['w'] as num?)?.toDouble();
+        final h = (val['h'] as num?)?.toDouble();
+        if (x != null && y != null && w != null && h != null) {
+          resolved[key.toString()] = _PdfGuideRect(x, y, w, h);
+        }
+      }
+    });
+    return resolved;
+  }
+
+  static List<_PdfElementGuideItem> _resolveStyleGuideBreakdown(Map<String, dynamic> job) {
+    final serverBreakdown = job['element_breakdown'];
+    if (serverBreakdown is List && serverBreakdown.isNotEmpty) {
+      final parsed = <_PdfElementGuideItem>[];
+      for (final raw in serverBreakdown) {
+        if (raw is! Map) continue;
+        final key = (raw['key'] ?? 'frame').toString();
+        final meta = CombineElementMeta.forKey(key);
+        parsed.add(
+          _PdfElementGuideItem(
+            meta: meta,
+            pdfColor: _pdfColorForElementKey(meta.key),
+            designId: int.tryParse('${raw['design_id']}') ?? 0,
+            designTitle: _sanitizePdfText((raw['design_title'] ?? 'Catalog Design').toString()),
+            designImageUrl: (raw['design_image_url'] ?? '').toString(),
+            isExplicit: raw['is_explicit'] == true,
+            description: _sanitizePdfText((raw['description'] ?? meta.defaultDescription).toString()),
+          ),
+        );
+      }
+      if (parsed.isNotEmpty) return parsed;
+    }
+
+    final refDesigns = (job['reference_designs'] as List?) ?? [];
+    final refElements = (job['reference_elements'] as List?) ?? [];
+    final refDesignIds = (job['reference_design_ids'] as List?) ?? [];
+    if (refDesigns.isEmpty && refElements.isEmpty) return [];
+
+    final designById = <int, Map<String, dynamic>>{};
+    int? firstDesignId;
+    for (final raw in refDesigns) {
+      if (raw is Map) {
+        final m = Map<String, dynamic>.from(raw);
+        final id = int.tryParse('${m['id']}');
+        if (id != null) {
+          designById[id] = m;
+          firstDesignId ??= id;
+        }
+      }
+    }
+    if (firstDesignId == null && refDesignIds.isNotEmpty) {
+      firstDesignId = int.tryParse('${refDesignIds.first}');
+    }
+
+    int? frameId;
+    int? centerId;
+    int? borderId;
+    int? crownId;
+    int? panelId;
+    int? latestLeafId;
+    String? latestLeafRole;
+
+    for (final raw in refElements) {
+      if (raw is! Map) continue;
+      final did = int.tryParse('${raw['design_id']}');
+      final el = (raw['element'] ?? '').toString().trim().toLowerCase();
+      if (did == null || el.isEmpty) continue;
+      firstDesignId ??= did;
+
+      if (el.contains('frame')) {
+        frameId = did;
+      } else if (el.contains('arch') || el.contains('crown') || el.contains('top')) {
+        crownId = did;
+      } else if (el.contains('panel') || el.contains('layout')) {
+        panelId = did;
+        latestLeafId = did;
+        latestLeafRole = 'panel';
+      } else if (el.contains('center') ||
+          el.contains('carving') ||
+          el.contains('medallion') ||
+          el.contains('bell')) {
+        centerId = did;
+        latestLeafId = did;
+        latestLeafRole = 'center';
+      } else if (el.contains('border') || el.contains('polish') || el.contains('finish')) {
+        borderId = did;
+      }
+    }
+
+    final fallbackFirst = firstDesignId ?? 0;
+    final baseId = frameId ?? crownId ?? latestLeafId ?? borderId ?? fallbackFirst;
+    final effectiveLeafId = latestLeafId ?? baseId;
+    final polishShade = _sanitizePdfText(
+      (job['polish_shade'] ?? 'Natural Teak Matte').toString().trim(),
     );
+
+    _PdfElementGuideItem makeItem(CombineElementMeta meta, int? explicitId, int fallbackId, String desc) {
+      final did = explicitId ?? fallbackId;
+      final d = designById[did];
+      return _PdfElementGuideItem(
+        meta: meta,
+        pdfColor: _pdfColorForElementKey(meta.key),
+        designId: did,
+        designTitle: _sanitizePdfText((d?['title'] ?? 'Design #$did').toString()),
+        designImageUrl: (d?['image_url'] ?? '').toString(),
+        isExplicit: explicitId != null,
+        description: _sanitizePdfText(desc),
+      );
+    }
+
+    return [
+      makeItem(
+        CombineElementMeta.all[0],
+        frameId,
+        baseId,
+        'Full outer wooden frame & left/right carved pillars',
+      ),
+      makeItem(
+        CombineElementMeta.all[1],
+        latestLeafRole == 'center' ? centerId : (panelId == null ? centerId : null),
+        effectiveLeafId,
+        'Main carving artwork inside the door leaf',
+      ),
+      makeItem(
+        CombineElementMeta.all[2],
+        borderId,
+        baseId,
+        '${polishShade.isNotEmpty ? polishShade : 'Natural Teak'} wood tone, shine & inner border molding',
+      ),
+      makeItem(
+        CombineElementMeta.all[3],
+        crownId,
+        baseId,
+        'Top arch, temple carving & crown header only',
+      ),
+      makeItem(
+        CombineElementMeta.all[4],
+        latestLeafRole == 'panel' ? panelId : (centerId == null ? panelId : null),
+        effectiveLeafId,
+        'Full inner door shutter & panel layout',
+      ),
+    ];
+  }
+
+  /// Desktop / A4 3-column pictorial Style Source Guide matching Screenshot 2.
+  static pw.Widget _buildStyleSourceGuideWide({
+    required String category,
+    required double contentWidth,
+    required pw.MemoryImage? doorImg,
+    required double doorAspect,
+    required List<_PdfElementGuideItem> items,
+    required Map<String, _PdfGuideRect> regions,
+    required Map<String, pw.MemoryImage> sourceImages,
+  }) {
+    final byKey = <String, _PdfElementGuideItem>{
+      for (final it in items) it.meta.key: it,
+    };
+
+    final innerW = contentWidth - 2.0; // account for outer 1pt border left + right
+    const diagramH = 268.0;
+    const padX = 8.0;
+    const padY = 8.0;
+    final sideCardW = ((innerW - padX * 2) * 0.338).clamp(150.0, 192.0);
+    const gapW = 14.0;
+    final doorBoxW = (innerW - padX * 2 - sideCardW * 2 - gapW * 2).clamp(112.0, 180.0);
+    const doorBoxH = diagramH - padY * 2;
+    final doorLeft = (innerW - doorBoxW) / 2.0;
+    const doorTop = padY;
+    const doorPad = 5.0;
+
+    const cardH = 78.0;
+    final rightX = innerW - padX - sideCardW;
+
+    final cardRects = <String, _PdfGuideRect>{
+      'crown': _PdfGuideRect(padX, 8.0, sideCardW, cardH),
+      'frame': _PdfGuideRect(padX, (diagramH - cardH) / 2.0, sideCardW, cardH),
+      'panel': _PdfGuideRect(padX, diagramH - cardH - 8.0, sideCardW, cardH),
+      'center': _PdfGuideRect(rightX, diagramH * 0.165, sideCardW, cardH),
+      'border': _PdfGuideRect(rightX, diagramH * 0.56, sideCardW, cardH),
+    };
+
+    final doorInnerRect = _PdfGuideRect(
+      doorLeft + doorPad,
+      doorTop + doorPad,
+      doorBoxW - doorPad * 2,
+      doorBoxH - doorPad * 2,
+    );
+    final renderedDoorRect = _computeRenderedDoorRect(
+      doorInnerRect: doorInnerRect,
+      doorAspect: doorAspect,
+    );
+    final mappedZones = _computeMappedZones(
+      renderedDoorRect: renderedDoorRect,
+      regions: regions,
+    );
+    final badgeCenters = _computeDoorBadgeCenters(mappedZones);
+    const badgeSize = 14.0;
+
+    // Wrap in a horizontal Row so MultiPage keeps header + full diagram atomic across page breaks
+    return pw.Row(
+      children: [
+        pw.Expanded(
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+            children: [
+              pw.Text(
+                'SECTION DETAILS - STYLE SOURCE GUIDE',
+                style: pw.TextStyle(
+                  fontWeight: pw.FontWeight.bold,
+                  fontSize: 10.5,
+                  color: PdfColor.fromHex('#261B12'),
+                ),
+              ),
+              pw.SizedBox(height: 1.5),
+              pw.Text(
+                'Shows which catalog design contributed each section (1-5)',
+                style: const pw.TextStyle(fontSize: 7.5, color: PdfColors.grey700),
+              ),
+              pw.SizedBox(height: 5),
+              pw.Container(
+                width: contentWidth,
+                decoration: pw.BoxDecoration(
+                  color: PdfColor.fromHex('#FAF7F2'),
+                  borderRadius: pw.BorderRadius.circular(8),
+                  border: pw.Border.all(color: PdfColor.fromHex('#E2D9CC'), width: 1.0),
+                ),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                  children: [
+                    // Dark wood header banner
+                    pw.Container(
+                      padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 6.5),
+                      decoration: pw.BoxDecoration(
+                        color: PdfColor.fromHex('#381E0E'),
+                        borderRadius: const pw.BorderRadius.only(
+                          topLeft: pw.Radius.circular(7),
+                          topRight: pw.Radius.circular(7),
+                        ),
+                      ),
+                      child: pw.Column(
+                        children: [
+                          pw.Text(
+                            'Custom $category - 5 Combine Elements Guide',
+                            textAlign: pw.TextAlign.center,
+                            style: pw.TextStyle(
+                              color: PdfColors.white,
+                              fontSize: 10.5,
+                              fontWeight: pw.FontWeight.bold,
+                            ),
+                          ),
+                          pw.SizedBox(height: 1.5),
+                          pw.Text(
+                            'Each color highlights the exact area & source catalog frame picked for your design',
+                            textAlign: pw.TextAlign.center,
+                            style: pw.TextStyle(
+                              color: PdfColor.fromHex('#ECDECC'),
+                              fontSize: 7.2,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // 3-Column Pictorial Diagram
+                    pw.SizedBox(
+                      width: innerW,
+                      height: diagramH,
+                      child: pw.Stack(
+                        children: [
+                          // Layer 1a: Center White Showcase Container
+                          pw.Positioned(
+                            left: doorLeft,
+                            top: doorTop,
+                            child: pw.Container(
+                              width: doorBoxW,
+                              height: doorBoxH,
+                              decoration: pw.BoxDecoration(
+                                color: PdfColors.white,
+                                borderRadius: pw.BorderRadius.circular(8),
+                                border: pw.Border.all(color: PdfColor.fromHex('#E2D9CC'), width: 1.0),
+                              ),
+                              child: doorImg == null
+                                  ? pw.Center(
+                                      child: pw.Text(
+                                        'Final Design Preview',
+                                        style: const pw.TextStyle(fontSize: 7.5, color: PdfColors.grey600),
+                                      ),
+                                    )
+                                  : null,
+                            ),
+                          ),
+
+                          // Layer 1b: Exact-positioned Door Image aligned 1:1 with renderedDoorRect
+                          if (doorImg != null)
+                            pw.Positioned(
+                              left: renderedDoorRect.left,
+                              top: renderedDoorRect.top,
+                              child: pw.SizedBox(
+                                width: renderedDoorRect.width,
+                                height: renderedDoorRect.height,
+                                child: pw.Image(doorImg, fit: pw.BoxFit.fill),
+                              ),
+                            ),
+
+                          // Layer 2: Vector Zone Overlays + Leader Callout Lines + Target Dots
+                          pw.Positioned(
+                            left: 0,
+                            top: 0,
+                            child: pw.CustomPaint(
+                              size: PdfPoint(innerW, diagramH),
+                              painter: (PdfGraphics canvas, PdfPoint size) {
+                                _paintPdfPictorialOverlay(
+                                  canvas: canvas,
+                                  size: size,
+                                  zones: mappedZones,
+                                  cardRects: cardRects,
+                                  byKey: byKey,
+                                  doorCenterX: doorInnerRect.centerX,
+                                  drawLeaderLines: true,
+                                );
+                              },
+                            ),
+                          ),
+
+                          // Layer 3a: Numbered Circular Badges right on each zone of the door
+                          for (final meta in CombineElementMeta.all)
+                            if (byKey.containsKey(meta.key) && badgeCenters.containsKey(meta.key))
+                              pw.Positioned(
+                                left: badgeCenters[meta.key]!.x - badgeSize / 2,
+                                top: badgeCenters[meta.key]!.y - badgeSize / 2,
+                                child: _buildNumberBadge(
+                                  number: meta.number,
+                                  color: _pdfColorForElementKey(meta.key),
+                                  size: badgeSize,
+                                  withWhiteRing: true,
+                                ),
+                              ),
+
+                          // Layer 3b: Left & Right Color-Coded Source Callout Cards
+                          for (final entry in cardRects.entries)
+                            if (byKey.containsKey(entry.key))
+                              pw.Positioned(
+                                left: entry.value.left,
+                                top: entry.value.top,
+                                child: pw.SizedBox(
+                                  width: entry.value.width,
+                                  height: entry.value.height,
+                                  child: _buildStyleCalloutCard(
+                                    item: byKey[entry.key]!,
+                                    thumbImg: sourceImages[byKey[entry.key]!.designImageUrl],
+                                    compact: false,
+                                  ),
+                                ),
+                              ),
+                        ],
+                      ),
+                    ),
+
+                    // Bottom Legend Strip
+                    pw.Container(height: 0.8, color: PdfColor.fromHex('#E2D9CC')),
+                    _buildLegendStrip(compact: false),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Compact / Narrow (A5 & 80mm Receipt) vertical Style Source Guide returned as flowable widgets.
+  static List<pw.Widget> _buildStyleSourceGuideCompact({
+    required String category,
+    required double contentWidth,
+    required pw.MemoryImage? doorImg,
+    required double doorAspect,
+    required List<_PdfElementGuideItem> items,
+    required Map<String, _PdfGuideRect> regions,
+    required Map<String, pw.MemoryImage> sourceImages,
+  }) {
+    final byKey = <String, _PdfElementGuideItem>{
+      for (final it in items) it.meta.key: it,
+    };
+    const orderedKeys = ['crown', 'frame', 'panel', 'center', 'border'];
+    final doorBoxH = (contentWidth * 0.96).clamp(155.0, 215.0);
+    const doorPad = 5.0;
+    final doorInnerRect = _PdfGuideRect(
+      doorPad,
+      doorPad,
+      contentWidth - doorPad * 2,
+      doorBoxH - doorPad * 2,
+    );
+    final renderedDoorRect = _computeRenderedDoorRect(
+      doorInnerRect: doorInnerRect,
+      doorAspect: doorAspect,
+    );
+    final mappedZones = _computeMappedZones(
+      renderedDoorRect: renderedDoorRect,
+      regions: regions,
+    );
+    final badgeCenters = _computeDoorBadgeCenters(mappedZones);
+    const badgeSize = 13.0;
+
+    return [
+      // Wrap in a horizontal Row so MultiPage keeps title, dark banner, and annotated door together
+      pw.Row(
+        children: [
+          pw.Expanded(
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+              children: [
+                pw.Text(
+                  'SECTION DETAILS - STYLE SOURCE GUIDE',
+                  style: pw.TextStyle(
+                    fontWeight: pw.FontWeight.bold,
+                    fontSize: 9.5,
+                    color: PdfColor.fromHex('#261B12'),
+                  ),
+                ),
+                pw.SizedBox(height: 1.5),
+                pw.Text(
+                  'Shows which catalog design contributed each section (1-5)',
+                  style: const pw.TextStyle(fontSize: 7.0, color: PdfColors.grey700),
+                ),
+                pw.SizedBox(height: 5),
+                pw.Container(
+                  width: contentWidth,
+                  padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  decoration: pw.BoxDecoration(
+                    color: PdfColor.fromHex('#381E0E'),
+                    borderRadius: pw.BorderRadius.circular(6),
+                  ),
+                  child: pw.Column(
+                    children: [
+                      pw.Text(
+                        'Custom $category - 5 Combine Elements Guide',
+                        textAlign: pw.TextAlign.center,
+                        style: pw.TextStyle(color: PdfColors.white, fontSize: 9.0, fontWeight: pw.FontWeight.bold),
+                      ),
+                      pw.SizedBox(height: 1.5),
+                      pw.Text(
+                        'Each color highlights the exact area & source catalog frame picked for your design',
+                        textAlign: pw.TextAlign.center,
+                        style: pw.TextStyle(color: PdfColor.fromHex('#ECDECC'), fontSize: 6.5),
+                      ),
+                    ],
+                  ),
+                ),
+                if (doorImg != null) ...[
+                  pw.SizedBox(height: 6),
+                  pw.Container(
+                    width: contentWidth,
+                    height: doorBoxH,
+                    decoration: pw.BoxDecoration(
+                      color: PdfColors.white,
+                      borderRadius: pw.BorderRadius.circular(7),
+                      border: pw.Border.all(color: PdfColor.fromHex('#E2D9CC'), width: 1.0),
+                    ),
+                    child: pw.Stack(
+                      children: [
+                        pw.Positioned(
+                          left: renderedDoorRect.left,
+                          top: renderedDoorRect.top,
+                          child: pw.SizedBox(
+                            width: renderedDoorRect.width,
+                            height: renderedDoorRect.height,
+                            child: pw.Image(doorImg, fit: pw.BoxFit.fill),
+                          ),
+                        ),
+                        pw.Positioned(
+                          left: 0,
+                          top: 0,
+                          child: pw.CustomPaint(
+                            size: PdfPoint(contentWidth, doorBoxH),
+                            painter: (PdfGraphics canvas, PdfPoint size) {
+                              _paintPdfPictorialOverlay(
+                                canvas: canvas,
+                                size: size,
+                                zones: mappedZones,
+                                cardRects: const {},
+                                byKey: byKey,
+                                doorCenterX: renderedDoorRect.centerX,
+                                drawLeaderLines: false,
+                              );
+                            },
+                          ),
+                        ),
+                        for (final meta in CombineElementMeta.all)
+                          if (byKey.containsKey(meta.key) && badgeCenters.containsKey(meta.key))
+                            pw.Positioned(
+                              left: badgeCenters[meta.key]!.x - badgeSize / 2,
+                              top: badgeCenters[meta.key]!.y - badgeSize / 2,
+                              child: _buildNumberBadge(
+                                number: meta.number,
+                                color: _pdfColorForElementKey(meta.key),
+                                size: badgeSize,
+                                withWhiteRing: true,
+                              ),
+                            ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+      pw.SizedBox(height: 6),
+      for (final key in orderedKeys)
+        if (byKey.containsKey(key)) ...[
+          _buildStyleCalloutCard(
+            item: byKey[key]!,
+            thumbImg: sourceImages[byKey[key]!.designImageUrl],
+            compact: true,
+          ),
+          pw.SizedBox(height: 5),
+        ],
+      _buildLegendStrip(compact: true),
+    ];
+  }
+
+  static pw.Widget _buildStyleCalloutCard({
+    required _PdfElementGuideItem item,
+    required pw.MemoryImage? thumbImg,
+    required bool compact,
+  }) {
+    final prefix = item.isExplicit ? 'From:' : 'Base:';
+    final thumbW = compact ? 32.0 : 35.0;
+    final thumbH = compact ? 48.0 : 64.0;
+
+    return pw.Container(
+      padding: pw.EdgeInsets.all(compact ? 5.0 : 4.5),
+      decoration: pw.BoxDecoration(
+        color: PdfColors.white,
+        borderRadius: pw.BorderRadius.circular(7),
+        border: pw.Border.all(color: item.pdfColor, width: 1.25),
+      ),
+      child: pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.center,
+        children: [
+          pw.Container(
+            width: thumbW,
+            height: thumbH,
+            padding: const pw.EdgeInsets.all(2),
+            decoration: pw.BoxDecoration(
+              color: PdfColor.fromHex('#FDFAF6'),
+              borderRadius: pw.BorderRadius.circular(4),
+              border: pw.Border.all(color: PdfColor.fromHex('#E2D9CC'), width: 0.7),
+            ),
+            child: thumbImg != null
+                ? pw.Center(child: pw.Image(thumbImg, fit: pw.BoxFit.contain))
+                : pw.Center(
+                    child: pw.Text(
+                      '#${item.designId}',
+                      style: pw.TextStyle(
+                        fontSize: 6.5,
+                        fontWeight: pw.FontWeight.bold,
+                        color: item.pdfColor,
+                      ),
+                    ),
+                  ),
+          ),
+          pw.SizedBox(width: 5.5),
+          pw.Expanded(
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              mainAxisAlignment: pw.MainAxisAlignment.center,
+              mainAxisSize: pw.MainAxisSize.min,
+              children: [
+                pw.Row(
+                  crossAxisAlignment: pw.CrossAxisAlignment.center,
+                  children: [
+                    _buildNumberBadge(
+                      number: item.meta.number,
+                      color: item.pdfColor,
+                      size: compact ? 12.0 : 12.5,
+                      withWhiteRing: false,
+                    ),
+                    pw.SizedBox(width: 4),
+                    pw.Expanded(
+                      child: pw.Text(
+                        _sanitizePdfText(item.meta.label),
+                        maxLines: 1,
+                        overflow: pw.TextOverflow.clip,
+                        style: pw.TextStyle(
+                          fontSize: compact ? 7.5 : 7.4,
+                          fontWeight: pw.FontWeight.bold,
+                          color: PdfColor.fromHex('#2A180C'),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                pw.SizedBox(height: 2.5),
+                pw.Text(
+                  '$prefix ${item.designTitle}',
+                  maxLines: 2,
+                  overflow: pw.TextOverflow.clip,
+                  style: pw.TextStyle(
+                    fontSize: compact ? 6.8 : 6.6,
+                    fontWeight: pw.FontWeight.bold,
+                    color: item.pdfColor,
+                    lineSpacing: 1.0,
+                  ),
+                ),
+                pw.SizedBox(height: 2),
+                pw.Text(
+                  item.description,
+                  maxLines: 2,
+                  overflow: pw.TextOverflow.clip,
+                  style: pw.TextStyle(
+                    fontSize: compact ? 6.0 : 5.9,
+                    color: PdfColor.fromHex('#5C5248'),
+                    lineSpacing: 1.0,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static pw.Widget _buildNumberBadge({
+    required int number,
+    required PdfColor color,
+    required double size,
+    required bool withWhiteRing,
+  }) {
+    return pw.Container(
+      width: size,
+      height: size,
+      alignment: pw.Alignment.center,
+      decoration: pw.BoxDecoration(
+        color: color,
+        shape: pw.BoxShape.circle,
+        border: withWhiteRing ? pw.Border.all(color: PdfColors.white, width: 1.3) : null,
+      ),
+      child: pw.Text(
+        '$number',
+        style: pw.TextStyle(
+          color: PdfColors.white,
+          fontSize: (size * 0.54).clamp(6.0, 9.0),
+          fontWeight: pw.FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
+  static pw.Widget _buildLegendStrip({required bool compact}) {
+    return pw.Container(
+      width: double.infinity,
+      padding: pw.EdgeInsets.symmetric(horizontal: compact ? 6 : 8, vertical: compact ? 5 : 6),
+      decoration: pw.BoxDecoration(
+        color: PdfColor.fromHex('#F3ECE2'),
+        borderRadius: compact
+            ? pw.BorderRadius.circular(6)
+            : const pw.BorderRadius.only(
+                bottomLeft: pw.Radius.circular(7),
+                bottomRight: pw.Radius.circular(7),
+              ),
+        border: compact ? pw.Border.all(color: PdfColor.fromHex('#E2D9CC'), width: 0.8) : null,
+      ),
+      child: pw.Wrap(
+        alignment: pw.WrapAlignment.center,
+        spacing: compact ? 7 : 10,
+        runSpacing: 4,
+        children: CombineElementMeta.all.map((m) {
+          return pw.Row(
+            mainAxisSize: pw.MainAxisSize.min,
+            crossAxisAlignment: pw.CrossAxisAlignment.center,
+            children: [
+              _buildNumberBadge(
+                number: m.number,
+                color: _pdfColorForElementKey(m.key),
+                size: compact ? 10.5 : 11.0,
+                withWhiteRing: false,
+              ),
+              pw.SizedBox(width: 3.5),
+              pw.Text(
+                _sanitizePdfText(m.label),
+                style: pw.TextStyle(
+                  fontSize: compact ? 6.5 : 7.0,
+                  fontWeight: pw.FontWeight.bold,
+                  color: PdfColor.fromHex('#2A180C'),
+                ),
+              ),
+            ],
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  static _PdfGuideRect _computeRenderedDoorRect({
+    required _PdfGuideRect doorInnerRect,
+    required double doorAspect,
+  }) {
+    final cW = doorInnerRect.width;
+    final cH = doorInnerRect.height;
+    final aspect = doorAspect.clamp(0.45, 1.35);
+    double rw = cW;
+    double rh = rw / aspect;
+    if (rh > cH) {
+      rh = cH;
+      rw = rh * aspect;
+    }
+    final ox = doorInnerRect.left + (cW - rw) / 2.0;
+    final oy = doorInnerRect.top + (cH - rh) / 2.0;
+    return _PdfGuideRect(ox, oy, rw, rh);
+  }
+
+  static Map<String, _PdfGuideRect> _computeMappedZones({
+    required _PdfGuideRect renderedDoorRect,
+    required Map<String, _PdfGuideRect> regions,
+  }) {
+    final ox = renderedDoorRect.left;
+    final oy = renderedDoorRect.top;
+    final rw = renderedDoorRect.width;
+    final rh = renderedDoorRect.height;
+
+    final out = <String, _PdfGuideRect>{};
+    for (final entry in regions.entries) {
+      final norm = entry.value;
+      out[entry.key] = _PdfGuideRect(
+        ox + norm.left * rw,
+        oy + norm.top * rh,
+        (norm.width * rw).clamp(8.0, rw),
+        (norm.height * rh).clamp(8.0, rh),
+      );
+    }
+    return out;
+  }
+
+  static Map<String, PdfPoint> _computeDoorBadgeCenters(Map<String, _PdfGuideRect> zones) {
+    final zCrown = zones['crown'];
+    final zFrame = zones['frame'];
+    final zPanel = zones['panel'];
+    final zCenter = zones['center'];
+    final zBorder = zones['border'];
+    final out = <String, PdfPoint>{};
+
+    if (zCrown != null) {
+      out['crown'] = PdfPoint(zCrown.centerX, zCrown.centerY);
+    }
+    if (zFrame != null && zPanel != null) {
+      out['frame'] = PdfPoint(
+        zFrame.left + ((zPanel.left - zFrame.left) * 0.52).clamp(5.0, 14.0),
+        zFrame.top + zFrame.height * 0.48,
+      );
+    }
+    if (zPanel != null) {
+      out['panel'] = PdfPoint(
+        zPanel.left + (zPanel.width * 0.24).clamp(10.0, 26.0),
+        zPanel.bottom - 9.0,
+      );
+    }
+    if (zCenter != null) {
+      out['center'] = PdfPoint(zCenter.centerX, zCenter.centerY);
+    }
+    if (zBorder != null) {
+      out['border'] = PdfPoint(zBorder.centerX, zBorder.bottom - 10.0);
+    }
+    return out;
+  }
+
+  static void _paintPdfPictorialOverlay({
+    required PdfGraphics canvas,
+    required PdfPoint size,
+    required Map<String, _PdfGuideRect> zones,
+    required Map<String, _PdfGuideRect> cardRects,
+    required Map<String, _PdfElementGuideItem> byKey,
+    required double doorCenterX,
+    required bool drawLeaderLines,
+  }) {
+    double toPdfY(double topDownY) => size.y - topDownY;
+
+    void drawZone(String key, {required bool dashed}) {
+      if (!byKey.containsKey(key)) return;
+      final r = zones[key];
+      if (r == null) return;
+      final col = _pdfColorForElementKey(key);
+      canvas.saveContext();
+      canvas.setStrokeColor(col);
+      canvas.setLineWidth(1.3);
+      if (dashed) {
+        canvas.setLineDashPattern([4.0, 2.5]);
+      } else {
+        canvas.setLineDashPattern();
+      }
+      final radius = (r.width < 12 || r.height < 12) ? 1.5 : 3.0;
+      canvas.drawRRect(r.left, toPdfY(r.bottom), r.width, r.height, radius, radius);
+      canvas.strokePath();
+      canvas.restoreContext();
+    }
+
+    drawZone('frame', dashed: true);
+    drawZone('panel', dashed: true);
+    drawZone('center', dashed: false);
+    drawZone('border', dashed: false);
+    drawZone('crown', dashed: false);
+
+    if (drawLeaderLines && cardRects.isNotEmpty) {
+      final zCrown = zones['crown'];
+      final zFrame = zones['frame'];
+      final zPanel = zones['panel'];
+      final zCenter = zones['center'];
+      final zBorder = zones['border'];
+
+      final targets = <String, PdfPoint>{
+        if (zCrown != null) 'crown': PdfPoint(zCrown.left + 6.0, zCrown.centerY),
+        if (zFrame != null) 'frame': PdfPoint(zFrame.left, zFrame.top + zFrame.height * 0.36),
+        if (zPanel != null) 'panel': PdfPoint(zPanel.left + 3.0, zPanel.bottom - (zPanel.height * 0.08).clamp(8.0, 15.0)),
+        if (zCenter != null) 'center': PdfPoint(zCenter.right - 3.0, zCenter.top + zCenter.height * 0.34),
+        if (zBorder != null) 'border': PdfPoint(zBorder.right, zBorder.centerY),
+      };
+
+      for (final m in CombineElementMeta.all) {
+        if (!byKey.containsKey(m.key)) continue;
+        final card = cardRects[m.key];
+        final target = targets[m.key];
+        if (card == null || target == null) continue;
+
+        final col = _pdfColorForElementKey(m.key);
+        final isLeft = card.centerX < doorCenterX;
+        final startX = isLeft ? card.right : card.left;
+        final startY = card.centerY;
+        final elbowX = isLeft ? card.right + 7.5 : card.left - 7.5;
+
+        canvas.saveContext();
+        canvas.setStrokeColor(col);
+        canvas.setLineWidth(1.15);
+        canvas.setLineCap(PdfLineCap.round);
+        canvas.setLineJoin(PdfLineJoin.round);
+        canvas.setLineDashPattern();
+        canvas.moveTo(startX, toPdfY(startY));
+        canvas.lineTo(elbowX, toPdfY(startY));
+        canvas.lineTo(target.x, toPdfY(target.y));
+        canvas.strokePath();
+
+        // White-ringed target dot on the door zone
+        canvas.setFillColor(PdfColors.white);
+        canvas.drawEllipse(target.x, toPdfY(target.y), 3.1, 3.1);
+        canvas.fillPath();
+
+        canvas.setFillColor(col);
+        canvas.drawEllipse(target.x, toPdfY(target.y), 1.9, 1.9);
+        canvas.fillPath();
+        canvas.restoreContext();
+      }
+    }
   }
 
   static List<pw.Widget> _customerSpecRows(Map<String, dynamic> order, {required bool compact}) => [
@@ -627,11 +1577,53 @@ class PdfService {
         children: [
           pw.SizedBox(
             width: compact ? 82 : 108,
-            child: pw.Text('$label:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: compact ? 8.5 : 10)),
+            child: pw.Text(
+              '${_sanitizePdfText(label)}:',
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: compact ? 8.5 : 10),
+            ),
           ),
-          pw.Expanded(child: pw.Text(value, style: pw.TextStyle(fontSize: compact ? 8.5 : 10))),
+          pw.Expanded(
+            child: pw.Text(
+              _sanitizePdfText(value),
+              style: pw.TextStyle(fontSize: compact ? 8.5 : 10),
+            ),
+          ),
         ],
       ),
     );
   }
+}
+
+class _PdfGuideRect {
+  final double left;
+  final double top;
+  final double width;
+  final double height;
+
+  const _PdfGuideRect(this.left, this.top, this.width, this.height);
+
+  double get right => left + width;
+  double get bottom => top + height;
+  double get centerX => left + width / 2.0;
+  double get centerY => top + height / 2.0;
+}
+
+class _PdfElementGuideItem {
+  final CombineElementMeta meta;
+  final PdfColor pdfColor;
+  final int designId;
+  final String designTitle;
+  final String designImageUrl;
+  final bool isExplicit;
+  final String description;
+
+  const _PdfElementGuideItem({
+    required this.meta,
+    required this.pdfColor,
+    required this.designId,
+    required this.designTitle,
+    required this.designImageUrl,
+    required this.isExplicit,
+    required this.description,
+  });
 }
