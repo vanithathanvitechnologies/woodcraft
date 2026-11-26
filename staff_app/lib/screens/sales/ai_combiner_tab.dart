@@ -247,9 +247,68 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
   }
 
   List<PictorialElementItem> _buildBreakdownItems(dynamic serverBreakdown) {
+    // Index server breakdown entries by key for metadata lookup, but strictly render
+    // ONLY the elements explicitly selected by the user (1..5 images -> 1..5 sections).
+    final serverByKey = <String, Map<String, dynamic>>{};
+    if (serverBreakdown is List) {
+      for (final raw in serverBreakdown) {
+        if (raw is Map) {
+          final m = Map<String, dynamic>.from(raw);
+          final k = (m['key'] ?? '').toString();
+          if (k.isNotEmpty) serverByKey[k] = m;
+        }
+      }
+    }
+
+    if (_selectedElements.isNotEmpty) {
+      final selectedByKey = <String, PictorialElementItem>{};
+      for (final e in _selectedElements.entries) {
+        final did = e.key;
+        final meta = CombineElementMeta.forLabel(e.value);
+        final design = _catalog.cast<Map?>().firstWhere(
+              (c) => c != null && c['id'] == did,
+              orElse: () => null,
+            );
+        final srv = serverByKey[meta.key];
+        final srvMatchesDesign = srv != null && int.tryParse('${srv['design_id']}') == did;
+
+        final defaultDesc = meta.key == 'border'
+            ? '$_polishShade wood tone, shine & inner border molding'
+            : meta.defaultDescription;
+
+        final rawTitle = design?['title']?.toString() ??
+            (srvMatchesDesign ? srv['design_title']?.toString() : null) ??
+            'Design #$did';
+        final rawImg = design?['image_url']?.toString() ??
+            (srvMatchesDesign ? srv['design_image_url']?.toString() : null) ??
+            '';
+        final desc = srvMatchesDesign
+            ? (srv['description']?.toString() ?? defaultDesc)
+            : defaultDesc;
+
+        selectedByKey[meta.key] = PictorialElementItem(
+          meta: meta,
+          designId: did,
+          designTitle: rawTitle,
+          designImageUrl: ApiService.instance.mediaUrl(rawImg),
+          isExplicit: true,
+          description: desc,
+        );
+      }
+
+      final result = selectedByKey.values.toList()
+        ..sort((a, b) => a.meta.number.compareTo(b.meta.number));
+      return result;
+    }
+
     if (serverBreakdown is List && serverBreakdown.isNotEmpty) {
-      return serverBreakdown.map((raw) {
-        final m = Map<String, dynamic>.from(raw as Map);
+      final explicitOnly = serverBreakdown
+          .whereType<Map>()
+          .where((m) => m['is_explicit'] == true)
+          .toList();
+      final source = explicitOnly.isNotEmpty ? explicitOnly : serverBreakdown.whereType<Map>().toList();
+      return source.map((raw) {
+        final m = Map<String, dynamic>.from(raw);
         final key = (m['key'] ?? 'frame').toString();
         final meta = CombineElementMeta.forKey(key);
         return PictorialElementItem(
@@ -257,67 +316,14 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
           designId: int.tryParse('${m['design_id']}') ?? 0,
           designTitle: (m['design_title'] ?? 'Catalog Design').toString(),
           designImageUrl: ApiService.instance.mediaUrl(m['design_image_url']?.toString()),
-          isExplicit: m['is_explicit'] == true,
+          isExplicit: true,
           description: (m['description'] ?? meta.defaultDescription).toString(),
         );
-      }).toList();
+      }).toList()
+        ..sort((a, b) => a.meta.number.compareTo(b.meta.number));
     }
 
-    // Local fallback when connected to an older API without element_breakdown
-    int? frameId;
-    int? centerId;
-    int? borderId;
-    int? crownId;
-    int? panelId;
-    int? latestLeafId;
-    String? latestLeafRole;
-
-    for (final e in _selectedElements.entries) {
-      final low = e.value.toLowerCase();
-      if (low.contains('frame')) {
-        frameId = e.key;
-      } else if (low.contains('arch') || low.contains('crown') || low.contains('top')) {
-        crownId = e.key;
-      } else if (low.contains('panel') || low.contains('layout')) {
-        panelId = e.key;
-        latestLeafId = e.key;
-        latestLeafRole = 'panel';
-      } else if (low.contains('center') || low.contains('carving')) {
-        centerId = e.key;
-        latestLeafId = e.key;
-        latestLeafRole = 'center';
-      } else if (low.contains('border') || low.contains('polish') || low.contains('finish')) {
-        borderId = e.key;
-      }
-    }
-
-    final firstId = _selectedElements.keys.isNotEmpty ? _selectedElements.keys.first : 0;
-    final baseId = frameId ?? crownId ?? latestLeafId ?? firstId;
-    final effectiveLeafId = latestLeafId ?? baseId;
-
-    PictorialElementItem makeItem(CombineElementMeta meta, int? explicitId, int fallbackId, String desc) {
-      final did = explicitId ?? fallbackId;
-      final design = _catalog.cast<Map?>().firstWhere(
-            (c) => c != null && c['id'] == did,
-            orElse: () => null,
-          );
-      return PictorialElementItem(
-        meta: meta,
-        designId: did,
-        designTitle: (design?['title'] ?? 'Design #$did').toString(),
-        designImageUrl: ApiService.instance.mediaUrl(design?['image_url']?.toString()),
-        isExplicit: explicitId != null,
-        description: desc,
-      );
-    }
-
-    return [
-      makeItem(CombineElementMeta.all[0], frameId, baseId, 'Full outer wooden frame & left/right carved pillars'),
-      makeItem(CombineElementMeta.all[1], latestLeafRole == 'center' ? centerId : null, effectiveLeafId, 'Main carving artwork inside the door leaf'),
-      makeItem(CombineElementMeta.all[2], borderId, baseId, '$_polishShade wood tone, shine & inner border molding'),
-      makeItem(CombineElementMeta.all[3], crownId, baseId, 'Curved top arch, temple carving & crown header only'),
-      makeItem(CombineElementMeta.all[4], latestLeafRole == 'panel' ? panelId : null, effectiveLeafId, 'Full inner door shutter & panel layout'),
-    ];
+    return [];
   }
 
   Future<void> _generateAiDesign() async {
@@ -1054,7 +1060,7 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
                             ),
                             SizedBox(height: 2),
                             Text(
-                              'Shows which catalog design contributed each section (1–5)',
+                              'Shows which selected catalog design contributed each marked section',
                               style: TextStyle(fontSize: 11.5, color: Colors.black54),
                             ),
                           ],

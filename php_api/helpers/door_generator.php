@@ -1698,8 +1698,10 @@ function renderAnnotatedGuidePngPhp(
     imagefilledrectangle($im, 0, 0, $W, $H, $creamBg);
     imagefilledrectangle($im, 0, 0, $W, 96, $headerBg);
 
-    gdDrawText($im, 24, (int)($W / 2), 46, $white, "Custom $category — 5 Combine Elements Guide", $fontBold, 'center');
-    gdDrawText($im, 12, (int)($W / 2), 76, $creamSub, 'Each color highlights the exact area & source catalog frame picked when combining designs', $fontReg, 'center');
+    $elCount = count($breakdown);
+    $elWord = $elCount === 1 ? 'Element' : 'Elements';
+    gdDrawText($im, 24, (int)($W / 2), 46, $white, "Custom $category — $elCount Selected $elWord Guide", $fontBold, 'center');
+    gdDrawText($im, 12, (int)($W / 2), 76, $creamSub, 'Each color highlights only the exact areas & source catalog designs you selected', $fontReg, 'center');
 
     // 2) Center Generated HD Door Showcase Container
     $boxX0 = 448; $boxY0 = 114; $boxX1 = 1152; $boxY1 = 1114;
@@ -1853,14 +1855,19 @@ function renderAnnotatedGuidePngPhp(
     if (isset($byKey['center'])) gdDrawBadgeCircle($im, $centerBadgeX, $centerBadgeY, 18, $elemColors['center'], $white, '2', $fontBold);
     if (isset($byKey['border'])) gdDrawBadgeCircle($im, $borderBadgeX, $borderBadgeY, 18, $elemColors['border'], $white, '3', $fontBold);
 
-    // Bottom legend footer bar
+    // Bottom legend footer bar (only selected elements)
+    $legendParts = [];
+    foreach ($breakdown as $bItem) {
+        $legendParts[] = ($bItem['number'] ?? '') . ' ' . ($bItem['label'] ?? '');
+    }
+    $legendText = 'WoodCraft AI Combiner Reference' . (!empty($legendParts) ? ('  |  ' . implode('  •  ', $legendParts)) : '');
     gdDrawText(
         $im,
         11,
         (int)($W / 2),
         1152,
         $textMuted,
-        'WoodCraft AI Combiner Reference  |  1 Frame Style  •  2 Center Carving  •  3 Border / Polish Finish  •  4 Top Arch & Crown  •  5 Panel Layout',
+        $legendText,
         $fontReg,
         'center'
     );
@@ -1998,25 +2005,24 @@ function renderDoorPngPhp(array $opts): array {
 
             $designById = [];
             foreach ($refDesigns as $d) $designById[(int)($d['id'] ?? 0)] = $d;
-            $baseFallback = $frameId ?? $crownId ?? $latestLeafId ?? $ids[0];
-            $leafFallback = $latestLeafId ?? $baseFallback;
-            $mkItem = function (int $num, string $key, string $label, string $colorHex, ?int $explicitId, int $fallbackId, string $desc) use ($designById): array {
-                $eid = $explicitId ?? $fallbackId;
+            $mkItem = function (int $num, string $key, string $label, string $colorHex, int $eid, string $desc) use ($designById): array {
                 $d = $designById[$eid] ?? ['id' => $eid, 'title' => "Design #$eid", 'image_url' => ''];
                 return [
                     'number' => $num, 'key' => $key, 'label' => $label, 'color' => $colorHex,
                     'design_id' => $eid, 'design_title' => (string)($d['title'] ?? "Design #$eid"),
                     'design_image_url' => (string)($d['image_url'] ?? ''),
-                    'is_explicit' => ($explicitId !== null), 'description' => $desc,
+                    'is_explicit' => true, 'description' => $desc,
                 ];
             };
-            $elementBreakdown = [
-                $mkItem(1, 'frame',  'Frame Style',            '#2563EB', $frameId, $baseFallback, 'Full outer wooden frame & left/right carved pillars'),
-                $mkItem(2, 'center', 'Center Carving',         '#EA580C', $latestLeafRole === 'center' ? $latestLeafId : null, $leafFallback, 'Main carving artwork inside the door leaf'),
-                $mkItem(3, 'border', 'Border / Polish Finish', '#9333EA', $finishId, $baseFallback, "$polishShade wood tone, shine & inner border molding"),
-                $mkItem(4, 'crown',  'Top Arch & Crown',       '#DC2626', $crownId, $baseFallback, 'Top arch, temple carving & crown header only'),
-                $mkItem(5, 'panel',  'Panel Layout',           '#16A34A', $latestLeafRole === 'panel' ? $latestLeafId : null, $leafFallback, 'Full inner door shutter & panel layout'),
-            ];
+            $elementBreakdown = [];
+            if ($frameId !== null)  $elementBreakdown[] = $mkItem(1, 'frame',  'Frame Style',            '#2563EB', $frameId,  'Full outer wooden frame & left/right carved pillars');
+            if ($centerId !== null) $elementBreakdown[] = $mkItem(2, 'center', 'Center Carving',         '#EA580C', $centerId, 'Main carving artwork inside the door leaf');
+            if ($finishId !== null) $elementBreakdown[] = $mkItem(3, 'border', 'Border / Polish Finish', '#9333EA', $finishId, "$polishShade wood tone, shine & inner border molding");
+            if ($crownId !== null)  $elementBreakdown[] = $mkItem(4, 'crown',  'Top Arch & Crown',       '#DC2626', $crownId,  'Top arch, temple carving & crown header only');
+            if ($panelId !== null)  $elementBreakdown[] = $mkItem(5, 'panel',  'Panel Layout',           '#16A34A', $panelId,  'Full inner door shutter & panel layout');
+            if (empty($elementBreakdown) && !empty($ids)) {
+                $elementBreakdown[] = $mkItem(1, 'frame', 'Frame Style', '#2563EB', $ids[0], 'Full outer wooden frame & left/right carved pillars');
+            }
 
             $guideFilename = preg_replace('/\.png$/i', '-guide.png', $filename);
             $guidePath = rtrim($outputDir, '/\\') . DIRECTORY_SEPARATOR . $guideFilename;
@@ -2483,13 +2489,12 @@ function renderDoorPngPhp(array $opts): array {
                 ),
             ];
 
-            // Build accurate source metadata lookup for all 5 combine elements
+            // Build accurate source metadata lookup ONLY for the user's explicitly selected elements
             $designById = [];
             foreach ($refDesigns as $d) {
                 $designById[(int)($d['id'] ?? 0)] = $d;
             }
-            $buildBreakdownItem = function (int $num, string $key, string $label, string $colorHex, ?int $explicitId, int $fallbackId, string $desc) use ($designById): array {
-                $effectiveId = $explicitId ?? $fallbackId;
+            $buildBreakdownItem = function (int $num, string $key, string $label, string $colorHex, int $effectiveId, string $desc) use ($designById): array {
                 $d = $designById[$effectiveId] ?? ['id' => $effectiveId, 'title' => "Design #$effectiveId", 'image_url' => ''];
                 return [
                     'number' => $num,
@@ -2499,21 +2504,20 @@ function renderDoorPngPhp(array $opts): array {
                     'design_id' => $effectiveId,
                     'design_title' => (string)($d['title'] ?? "Design #$effectiveId"),
                     'design_image_url' => (string)($d['image_url'] ?? ''),
-                    'is_explicit' => ($explicitId !== null),
+                    'is_explicit' => true,
                     'description' => $desc,
                 ];
             };
 
-            $effectiveLeafId = $latestLeafId ?? $baseId;
-            $effectiveFrameFallback = $frameToneId ?? $baseId;
-
-            $elementBreakdown = [
-                $buildBreakdownItem(1, 'frame',  'Frame Style',            '#2563EB', $frameId,        $effectiveFrameFallback, 'Full outer wooden frame & left/right carved pillars'),
-                $buildBreakdownItem(2, 'center', 'Center Carving',         '#EA580C', $latestLeafRole === 'center' ? $latestLeafId : null, $effectiveLeafId, 'Main carving artwork inside the door leaf'),
-                $buildBreakdownItem(3, 'border', 'Border / Polish Finish', '#9333EA', $finishId,       $effectiveFrameFallback, "$polishShade wood tone, shine & inner border molding"),
-                $buildBreakdownItem(4, 'crown',  'Top Arch & Crown',       '#DC2626', $crownId,        $baseId,                 'Top arch, temple carving & crown header only'),
-                $buildBreakdownItem(5, 'panel',  'Panel Layout',           '#16A34A', $latestLeafRole === 'panel' ? $latestLeafId : null,  $effectiveLeafId, 'Full inner door shutter & panel layout'),
-            ];
+            $elementBreakdown = [];
+            if ($frameId !== null)  $elementBreakdown[] = $buildBreakdownItem(1, 'frame',  'Frame Style',            '#2563EB', $frameId,  'Full outer wooden frame & left/right carved pillars');
+            if ($centerId !== null) $elementBreakdown[] = $buildBreakdownItem(2, 'center', 'Center Carving',         '#EA580C', $centerId, 'Main carving artwork inside the door leaf');
+            if ($finishId !== null) $elementBreakdown[] = $buildBreakdownItem(3, 'border', 'Border / Polish Finish', '#9333EA', $finishId, "$polishShade wood tone, shine & inner border molding");
+            if ($crownId !== null)  $elementBreakdown[] = $buildBreakdownItem(4, 'crown',  'Top Arch & Crown',       '#DC2626', $crownId,  'Top arch, temple carving & crown header only');
+            if ($panelId !== null)  $elementBreakdown[] = $buildBreakdownItem(5, 'panel',  'Panel Layout',           '#16A34A', $panelId,  'Full inner door shutter & panel layout');
+            if (empty($elementBreakdown)) {
+                $elementBreakdown[] = $buildBreakdownItem(1, 'frame', 'Frame Style', '#2563EB', $baseId, 'Full outer wooden frame & left/right carved pillars');
+            }
 
             // J) Render companion HD Pictorial Breakdown Guide PNG matching the reference diagram
             $guideFilename = preg_replace('/\.png$/i', '-guide.png', $filename);

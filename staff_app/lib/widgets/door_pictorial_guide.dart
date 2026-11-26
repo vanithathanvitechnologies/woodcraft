@@ -178,7 +178,7 @@ class _DoorElementsPictorialCardState extends State<DoorElementsPictorialCard> {
             child: Column(
               children: [
                 Text(
-                  'Custom ${widget.category} — 5 Combine Elements Guide',
+                  'Custom ${widget.category} — ${widget.items.length} Selected ${widget.items.length == 1 ? 'Element' : 'Elements'} Guide',
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     color: Colors.white,
@@ -189,7 +189,7 @@ class _DoorElementsPictorialCardState extends State<DoorElementsPictorialCard> {
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  'Each color highlights the exact area & source catalog frame picked for your design',
+                  'Each color highlights only the exact areas & source catalog designs you selected',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Colors.white.withValues(alpha: 0.82),
@@ -222,7 +222,7 @@ class _DoorElementsPictorialCardState extends State<DoorElementsPictorialCard> {
               alignment: WrapAlignment.center,
               spacing: 12,
               runSpacing: 6,
-              children: CombineElementMeta.all.map((m) {
+              children: CombineElementMeta.all.where((m) => byKey.containsKey(m.key)).map((m) {
                 return Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -337,6 +337,7 @@ class _DoorElementsPictorialCardState extends State<DoorElementsPictorialCard> {
                   doorContainerRect: doorRect.deflate(10),
                   regions: regions,
                   cardRects: cardRects,
+                  visibleKeys: byKey.keys.toSet(),
                   activeKey: _activeKey,
                   drawLeaderLines: true,
                   doorAspect: widget.imageAspect,
@@ -406,6 +407,7 @@ class _DoorElementsPictorialCardState extends State<DoorElementsPictorialCard> {
                               doorContainerRect: innerRect,
                               regions: regions,
                               cardRects: const {},
+                              visibleKeys: byKey.keys.toSet(),
                               activeKey: _activeKey,
                               drawLeaderLines: false,
                               doorAspect: widget.imageAspect,
@@ -569,6 +571,7 @@ class _PictorialOverlayPainter extends CustomPainter {
   final Rect doorContainerRect;
   final Map<String, Rect> regions;
   final Map<String, Rect> cardRects;
+  final Set<String> visibleKeys;
   final String? activeKey;
   final bool drawLeaderLines;
   final double doorAspect;
@@ -577,6 +580,7 @@ class _PictorialOverlayPainter extends CustomPainter {
     required this.doorContainerRect,
     required this.regions,
     required this.cardRects,
+    required this.visibleKeys,
     required this.activeKey,
     required this.drawLeaderLines,
     this.doorAspect = 0.75,
@@ -670,11 +674,11 @@ class _PictorialOverlayPainter extends CustomPainter {
       }
     }
 
-    drawZone('frame', zFrame, CombineElementMeta.all[0].color, dashed: true);
-    drawZone('panel', zPanel, CombineElementMeta.all[4].color, dashed: true);
-    drawZone('center', zCenter, CombineElementMeta.all[1].color, dashed: false);
-    drawZone('border', zBorder, CombineElementMeta.all[2].color, dashed: false);
-    drawZone('crown', zCrown, CombineElementMeta.all[3].color, dashed: false);
+    if (visibleKeys.contains('frame')) drawZone('frame', zFrame, CombineElementMeta.all[0].color, dashed: true);
+    if (visibleKeys.contains('panel')) drawZone('panel', zPanel, CombineElementMeta.all[4].color, dashed: true);
+    if (visibleKeys.contains('center')) drawZone('center', zCenter, CombineElementMeta.all[1].color, dashed: false);
+    if (visibleKeys.contains('border')) drawZone('border', zBorder, CombineElementMeta.all[2].color, dashed: false);
+    if (visibleKeys.contains('crown')) drawZone('crown', zCrown, CombineElementMeta.all[3].color, dashed: false);
 
     // Bent leader lines connecting side callout cards to door zones (wide view)
     if (drawLeaderLines && cardRects.isNotEmpty) {
@@ -687,6 +691,7 @@ class _PictorialOverlayPainter extends CustomPainter {
       };
 
       for (final m in CombineElementMeta.all) {
+        if (!visibleKeys.contains(m.key)) continue;
         final card = cardRects[m.key];
         final target = targets[m.key];
         if (card == null || target == null) continue;
@@ -715,30 +720,40 @@ class _PictorialOverlayPainter extends CustomPainter {
       }
     }
 
-    // Numbered badges right on each zone of the door
-    _drawNumberBadge(canvas, zCrown.center, 4, CombineElementMeta.all[3].color, activeKey == 'crown');
-    _drawNumberBadge(
-      canvas,
-      Offset(zFrame.left + ((zPanel.left - zFrame.left) * 0.52).clamp(12.0, 26.0), zFrame.top + zFrame.height * 0.48),
-      1,
-      CombineElementMeta.all[0].color,
-      activeKey == 'frame',
-    );
-    _drawNumberBadge(
-      canvas,
-      Offset(zPanel.left + (zPanel.width * 0.24).clamp(18.0, 56.0), zPanel.bottom - 16),
-      5,
-      CombineElementMeta.all[4].color,
-      activeKey == 'panel',
-    );
-    _drawNumberBadge(canvas, zCenter.center, 2, CombineElementMeta.all[1].color, activeKey == 'center');
-    _drawNumberBadge(
-      canvas,
-      Offset(zBorder.center.dx, zBorder.bottom - 18),
-      3,
-      CombineElementMeta.all[2].color,
-      activeKey == 'border',
-    );
+    // Numbered badges right on each selected zone of the door
+    if (visibleKeys.contains('crown')) {
+      _drawNumberBadge(canvas, zCrown.center, 4, CombineElementMeta.all[3].color, activeKey == 'crown');
+    }
+    if (visibleKeys.contains('frame')) {
+      _drawNumberBadge(
+        canvas,
+        Offset(zFrame.left + ((zPanel.left - zFrame.left) * 0.52).clamp(12.0, 26.0), zFrame.top + zFrame.height * 0.48),
+        1,
+        CombineElementMeta.all[0].color,
+        activeKey == 'frame',
+      );
+    }
+    if (visibleKeys.contains('panel')) {
+      _drawNumberBadge(
+        canvas,
+        Offset(zPanel.left + (zPanel.width * 0.24).clamp(18.0, 56.0), zPanel.bottom - 16),
+        5,
+        CombineElementMeta.all[4].color,
+        activeKey == 'panel',
+      );
+    }
+    if (visibleKeys.contains('center')) {
+      _drawNumberBadge(canvas, zCenter.center, 2, CombineElementMeta.all[1].color, activeKey == 'center');
+    }
+    if (visibleKeys.contains('border')) {
+      _drawNumberBadge(
+        canvas,
+        Offset(zBorder.center.dx, zBorder.bottom - 18),
+        3,
+        CombineElementMeta.all[2].color,
+        activeKey == 'border',
+      );
+    }
   }
 
   @override
@@ -747,6 +762,8 @@ class _PictorialOverlayPainter extends CustomPainter {
         oldDelegate.doorContainerRect != doorContainerRect ||
         oldDelegate.drawLeaderLines != drawLeaderLines ||
         oldDelegate.doorAspect != doorAspect ||
-        oldDelegate.regions != regions;
+        oldDelegate.regions != regions ||
+        oldDelegate.visibleKeys.length != visibleKeys.length ||
+        !oldDelegate.visibleKeys.containsAll(visibleKeys);
   }
 }

@@ -339,10 +339,13 @@ class PdfService {
   /// STRICTLY EXCLUDES Customer Name, Mobile, Address, and Pricing!
   static Future<void> printWorkshopJobSheet(Map<String, dynamic> job, {BuildContext? context}) async {
     final breakdownItems = _resolveStyleGuideBreakdown(job);
+    final refDesigns = (job['reference_designs'] as List?) ?? [];
 
     final uniqueSourceUrls = <String>{
       for (final item in breakdownItems)
         if (item.designImageUrl.isNotEmpty) item.designImageUrl,
+      for (final r in refDesigns)
+        if (r is Map && (r['image_url'] ?? '').toString().isNotEmpty) (r['image_url'] ?? '').toString(),
     }.toList();
 
     final loadedImages = await Future.wait<pw.MemoryImage?>([
@@ -582,9 +585,20 @@ class PdfService {
         ),
       ],
 
-      // Section Details - Style Source Guide (5 Combine Elements Pictorial Breakdown)
+      // Selected Reference Door Photos (clear individual photos of every selected door)
       if (breakdownItems.isNotEmpty) ...[
         pw.SizedBox(height: 10),
+        _buildSelectedReferencePhotosSection(
+          items: breakdownItems,
+          sourceImages: sourceImages,
+          contentWidth: contentWidth,
+          compact: isNarrow,
+        ),
+      ],
+
+      // Section Details - Style Source Guide (Pictorial Breakdown of ONLY the selected elements)
+      if (breakdownItems.isNotEmpty) ...[
+        pw.SizedBox(height: 12),
         if (isNarrow)
           ..._buildStyleSourceGuideCompact(
             category: categoryLabel.isEmpty ? 'Door' : categoryLabel,
@@ -697,11 +711,85 @@ class PdfService {
   }
 
   static List<_PdfElementGuideItem> _resolveStyleGuideBreakdown(Map<String, dynamic> job) {
+    final refDesigns = (job['reference_designs'] as List?) ?? [];
+    final refElements = (job['reference_elements'] as List?) ?? [];
     final serverBreakdown = job['element_breakdown'];
-    if (serverBreakdown is List && serverBreakdown.isNotEmpty) {
-      final parsed = <_PdfElementGuideItem>[];
+
+    final designById = <int, Map<String, dynamic>>{};
+    for (final raw in refDesigns) {
+      if (raw is Map) {
+        final m = Map<String, dynamic>.from(raw);
+        final id = int.tryParse('${m['id']}');
+        if (id != null) designById[id] = m;
+      }
+    }
+
+    final serverByKey = <String, Map<String, dynamic>>{};
+    if (serverBreakdown is List) {
       for (final raw in serverBreakdown) {
+        if (raw is Map) {
+          final m = Map<String, dynamic>.from(raw);
+          final k = (m['key'] ?? '').toString();
+          if (k.isNotEmpty) serverByKey[k] = m;
+        }
+      }
+    }
+
+    final polishShade = _sanitizePdfText(
+      (job['polish_shade'] ?? 'Natural Teak Matte').toString().trim(),
+    );
+
+    // Priority 1: Strictly map ONLY the elements explicitly selected in reference_elements
+    if (refElements.isNotEmpty) {
+      final selectedByKey = <String, _PdfElementGuideItem>{};
+      for (final raw in refElements) {
         if (raw is! Map) continue;
+        final did = int.tryParse('${raw['design_id']}');
+        final elLabel = (raw['element'] ?? '').toString().trim();
+        if (did == null || elLabel.isEmpty) continue;
+
+        final meta = CombineElementMeta.forLabel(elLabel);
+        final d = designById[did];
+        final srv = serverByKey[meta.key];
+        final srvMatches = srv != null && int.tryParse('${srv['design_id']}') == did;
+
+        final defaultDesc = meta.key == 'border'
+            ? '${polishShade.isNotEmpty ? polishShade : 'Natural Teak'} wood tone, shine & inner border molding'
+            : meta.defaultDescription;
+
+        final title = _sanitizePdfText(
+          (d?['title'] ?? (srvMatches ? srv['design_title'] : null) ?? 'Design #$did').toString(),
+        );
+        final imgUrl = (d?['image_url'] ?? (srvMatches ? srv['design_image_url'] : null) ?? '').toString();
+        final desc = _sanitizePdfText(
+          (srvMatches ? (srv['description'] ?? defaultDesc) : defaultDesc).toString(),
+        );
+
+        selectedByKey[meta.key] = _PdfElementGuideItem(
+          meta: meta,
+          pdfColor: _pdfColorForElementKey(meta.key),
+          designId: did,
+          designTitle: title,
+          designImageUrl: imgUrl,
+          isExplicit: true,
+          description: desc,
+        );
+      }
+
+      if (selectedByKey.isNotEmpty) {
+        final result = selectedByKey.values.toList()
+          ..sort((a, b) => a.meta.number.compareTo(b.meta.number));
+        return result;
+      }
+    }
+
+    // Priority 2: Explicit-only items from element_breakdown (ignore auto-filled Base items)
+    if (serverBreakdown is List && serverBreakdown.isNotEmpty) {
+      final maps = serverBreakdown.whereType<Map>().toList();
+      final explicitOnly = maps.where((m) => m['is_explicit'] == true).toList();
+      final source = explicitOnly.isNotEmpty ? explicitOnly : maps;
+      final parsed = <_PdfElementGuideItem>[];
+      for (final raw in source) {
         final key = (raw['key'] ?? 'frame').toString();
         final meta = CombineElementMeta.forKey(key);
         parsed.add(
@@ -711,123 +799,162 @@ class PdfService {
             designId: int.tryParse('${raw['design_id']}') ?? 0,
             designTitle: _sanitizePdfText((raw['design_title'] ?? 'Catalog Design').toString()),
             designImageUrl: (raw['design_image_url'] ?? '').toString(),
-            isExplicit: raw['is_explicit'] == true,
+            isExplicit: true,
             description: _sanitizePdfText((raw['description'] ?? meta.defaultDescription).toString()),
           ),
         );
       }
-      if (parsed.isNotEmpty) return parsed;
-    }
-
-    final refDesigns = (job['reference_designs'] as List?) ?? [];
-    final refElements = (job['reference_elements'] as List?) ?? [];
-    final refDesignIds = (job['reference_design_ids'] as List?) ?? [];
-    if (refDesigns.isEmpty && refElements.isEmpty) return [];
-
-    final designById = <int, Map<String, dynamic>>{};
-    int? firstDesignId;
-    for (final raw in refDesigns) {
-      if (raw is Map) {
-        final m = Map<String, dynamic>.from(raw);
-        final id = int.tryParse('${m['id']}');
-        if (id != null) {
-          designById[id] = m;
-          firstDesignId ??= id;
-        }
-      }
-    }
-    if (firstDesignId == null && refDesignIds.isNotEmpty) {
-      firstDesignId = int.tryParse('${refDesignIds.first}');
-    }
-
-    int? frameId;
-    int? centerId;
-    int? borderId;
-    int? crownId;
-    int? panelId;
-    int? latestLeafId;
-    String? latestLeafRole;
-
-    for (final raw in refElements) {
-      if (raw is! Map) continue;
-      final did = int.tryParse('${raw['design_id']}');
-      final el = (raw['element'] ?? '').toString().trim().toLowerCase();
-      if (did == null || el.isEmpty) continue;
-      firstDesignId ??= did;
-
-      if (el.contains('frame')) {
-        frameId = did;
-      } else if (el.contains('arch') || el.contains('crown') || el.contains('top')) {
-        crownId = did;
-      } else if (el.contains('panel') || el.contains('layout')) {
-        panelId = did;
-        latestLeafId = did;
-        latestLeafRole = 'panel';
-      } else if (el.contains('center') ||
-          el.contains('carving') ||
-          el.contains('medallion') ||
-          el.contains('bell')) {
-        centerId = did;
-        latestLeafId = did;
-        latestLeafRole = 'center';
-      } else if (el.contains('border') || el.contains('polish') || el.contains('finish')) {
-        borderId = did;
+      if (parsed.isNotEmpty) {
+        parsed.sort((a, b) => a.meta.number.compareTo(b.meta.number));
+        return parsed;
       }
     }
 
-    final fallbackFirst = firstDesignId ?? 0;
-    final baseId = frameId ?? crownId ?? latestLeafId ?? borderId ?? fallbackFirst;
-    final effectiveLeafId = latestLeafId ?? baseId;
-    final polishShade = _sanitizePdfText(
-      (job['polish_shade'] ?? 'Natural Teak Matte').toString().trim(),
+    // Priority 3: Legacy orders having reference_designs without element labels
+    if (refDesigns.isNotEmpty) {
+      final parsed = <_PdfElementGuideItem>[];
+      for (int i = 0; i < refDesigns.length && i < CombineElementMeta.all.length; i++) {
+        final raw = refDesigns[i];
+        if (raw is! Map) continue;
+        final meta = CombineElementMeta.all[i];
+        final did = int.tryParse('${raw['id']}') ?? 0;
+        final desc = meta.key == 'border'
+            ? '${polishShade.isNotEmpty ? polishShade : 'Natural Teak'} wood tone, shine & inner border molding'
+            : meta.defaultDescription;
+        parsed.add(
+          _PdfElementGuideItem(
+            meta: meta,
+            pdfColor: _pdfColorForElementKey(meta.key),
+            designId: did,
+            designTitle: _sanitizePdfText((raw['title'] ?? 'Design #$did').toString()),
+            designImageUrl: (raw['image_url'] ?? '').toString(),
+            isExplicit: true,
+            description: _sanitizePdfText(desc),
+          ),
+        );
+      }
+      return parsed;
+    }
+
+    return [];
+  }
+
+  /// Renders large, clear individual photos of every selected reference door for the workshop team.
+  static pw.Widget _buildSelectedReferencePhotosSection({
+    required List<_PdfElementGuideItem> items,
+    required Map<String, pw.MemoryImage> sourceImages,
+    required double contentWidth,
+    required bool compact,
+  }) {
+    final cardW = compact ? ((contentWidth - 8) / 2.0).clamp(84.0, 120.0) : 101.0;
+    final imgH = compact ? 92.0 : 120.0;
+
+    return pw.Row(
+      children: [
+        pw.Expanded(
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(
+                'SELECTED REFERENCE DOOR PHOTOS (${items.length})',
+                style: pw.TextStyle(
+                  fontWeight: pw.FontWeight.bold,
+                  fontSize: compact ? 9.5 : 10.5,
+                  color: PdfColor.fromHex('#261B12'),
+                ),
+              ),
+              pw.SizedBox(height: 1.5),
+              pw.Text(
+                'Individual source door photos selected for this custom order',
+                style: pw.TextStyle(fontSize: compact ? 7.0 : 7.5, color: PdfColors.grey700),
+              ),
+              pw.SizedBox(height: 6),
+              pw.Wrap(
+                spacing: compact ? 8 : 10,
+                runSpacing: compact ? 8 : 10,
+                children: items.map((item) {
+                  final img = sourceImages[item.designImageUrl];
+                  return pw.Container(
+                    width: cardW,
+                    padding: const pw.EdgeInsets.all(5),
+                    decoration: pw.BoxDecoration(
+                      color: PdfColors.white,
+                      borderRadius: pw.BorderRadius.circular(6),
+                      border: pw.Border.all(color: item.pdfColor, width: 1.2),
+                    ),
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.center,
+                      children: [
+                        pw.Container(
+                          width: cardW - 10,
+                          height: imgH,
+                          padding: const pw.EdgeInsets.all(2.5),
+                          decoration: pw.BoxDecoration(
+                            color: PdfColor.fromHex('#FDFAF6'),
+                            borderRadius: pw.BorderRadius.circular(4),
+                            border: pw.Border.all(color: PdfColor.fromHex('#E2D9CC'), width: 0.6),
+                          ),
+                          child: img != null
+                              ? pw.Center(child: pw.Image(img, fit: pw.BoxFit.contain))
+                              : pw.Center(
+                                  child: pw.Text(
+                                    'Design #${item.designId}',
+                                    textAlign: pw.TextAlign.center,
+                                    style: pw.TextStyle(
+                                      fontSize: 7,
+                                      fontWeight: pw.FontWeight.bold,
+                                      color: item.pdfColor,
+                                    ),
+                                  ),
+                                ),
+                        ),
+                        pw.SizedBox(height: 4.5),
+                        pw.Row(
+                          mainAxisAlignment: pw.MainAxisAlignment.center,
+                          crossAxisAlignment: pw.CrossAxisAlignment.center,
+                          children: [
+                            _buildNumberBadge(
+                              number: item.meta.number,
+                              color: item.pdfColor,
+                              size: 11.5,
+                              withWhiteRing: false,
+                            ),
+                            pw.SizedBox(width: 3.5),
+                            pw.Expanded(
+                              child: pw.Text(
+                                _sanitizePdfText(item.meta.label),
+                                maxLines: 1,
+                                overflow: pw.TextOverflow.clip,
+                                style: pw.TextStyle(
+                                  fontSize: compact ? 6.8 : 7.2,
+                                  fontWeight: pw.FontWeight.bold,
+                                  color: item.pdfColor,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        pw.SizedBox(height: 2),
+                        pw.Text(
+                          item.designTitle,
+                          maxLines: 2,
+                          overflow: pw.TextOverflow.clip,
+                          textAlign: pw.TextAlign.center,
+                          style: pw.TextStyle(
+                            fontSize: compact ? 6.2 : 6.6,
+                            color: PdfColor.fromHex('#2A180C'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
-
-    _PdfElementGuideItem makeItem(CombineElementMeta meta, int? explicitId, int fallbackId, String desc) {
-      final did = explicitId ?? fallbackId;
-      final d = designById[did];
-      return _PdfElementGuideItem(
-        meta: meta,
-        pdfColor: _pdfColorForElementKey(meta.key),
-        designId: did,
-        designTitle: _sanitizePdfText((d?['title'] ?? 'Design #$did').toString()),
-        designImageUrl: (d?['image_url'] ?? '').toString(),
-        isExplicit: explicitId != null,
-        description: _sanitizePdfText(desc),
-      );
-    }
-
-    return [
-      makeItem(
-        CombineElementMeta.all[0],
-        frameId,
-        baseId,
-        'Full outer wooden frame & left/right carved pillars',
-      ),
-      makeItem(
-        CombineElementMeta.all[1],
-        latestLeafRole == 'center' ? centerId : (panelId == null ? centerId : null),
-        effectiveLeafId,
-        'Main carving artwork inside the door leaf',
-      ),
-      makeItem(
-        CombineElementMeta.all[2],
-        borderId,
-        baseId,
-        '${polishShade.isNotEmpty ? polishShade : 'Natural Teak'} wood tone, shine & inner border molding',
-      ),
-      makeItem(
-        CombineElementMeta.all[3],
-        crownId,
-        baseId,
-        'Top arch, temple carving & crown header only',
-      ),
-      makeItem(
-        CombineElementMeta.all[4],
-        latestLeafRole == 'panel' ? panelId : (centerId == null ? panelId : null),
-        effectiveLeafId,
-        'Full inner door shutter & panel layout',
-      ),
-    ];
   }
 
   /// Desktop / A4 3-column pictorial Style Source Guide matching Screenshot 2.
@@ -901,7 +1028,7 @@ class PdfService {
               ),
               pw.SizedBox(height: 1.5),
               pw.Text(
-                'Shows which catalog design contributed each section (1-5)',
+                'Shows which selected catalog design contributed each marked section',
                 style: const pw.TextStyle(fontSize: 7.5, color: PdfColors.grey700),
               ),
               pw.SizedBox(height: 5),
@@ -928,7 +1055,7 @@ class PdfService {
                       child: pw.Column(
                         children: [
                           pw.Text(
-                            'Custom $category - 5 Combine Elements Guide',
+                            'Custom $category - ${items.length} Selected ${items.length == 1 ? 'Element' : 'Elements'} Guide',
                             textAlign: pw.TextAlign.center,
                             style: pw.TextStyle(
                               color: PdfColors.white,
@@ -938,7 +1065,7 @@ class PdfService {
                           ),
                           pw.SizedBox(height: 1.5),
                           pw.Text(
-                            'Each color highlights the exact area & source catalog frame picked for your design',
+                            'Each color highlights only the exact areas & source catalog designs you selected',
                             textAlign: pw.TextAlign.center,
                             style: pw.TextStyle(
                               color: PdfColor.fromHex('#ECDECC'),
@@ -1046,7 +1173,7 @@ class PdfService {
 
                     // Bottom Legend Strip
                     pw.Container(height: 0.8, color: PdfColor.fromHex('#E2D9CC')),
-                    _buildLegendStrip(compact: false),
+                    _buildLegendStrip(items: items, compact: false),
                   ],
                 ),
               ),
@@ -1108,7 +1235,7 @@ class PdfService {
                 ),
                 pw.SizedBox(height: 1.5),
                 pw.Text(
-                  'Shows which catalog design contributed each section (1-5)',
+                  'Shows which selected catalog design contributed each marked section',
                   style: const pw.TextStyle(fontSize: 7.0, color: PdfColors.grey700),
                 ),
                 pw.SizedBox(height: 5),
@@ -1122,13 +1249,13 @@ class PdfService {
                   child: pw.Column(
                     children: [
                       pw.Text(
-                        'Custom $category - 5 Combine Elements Guide',
+                        'Custom $category - ${items.length} Selected ${items.length == 1 ? 'Element' : 'Elements'} Guide',
                         textAlign: pw.TextAlign.center,
                         style: pw.TextStyle(color: PdfColors.white, fontSize: 9.0, fontWeight: pw.FontWeight.bold),
                       ),
                       pw.SizedBox(height: 1.5),
                       pw.Text(
-                        'Each color highlights the exact area & source catalog frame picked for your design',
+                        'Each color highlights only the exact areas & source catalog designs you selected',
                         textAlign: pw.TextAlign.center,
                         style: pw.TextStyle(color: PdfColor.fromHex('#ECDECC'), fontSize: 6.5),
                       ),
@@ -1205,7 +1332,7 @@ class PdfService {
           ),
           pw.SizedBox(height: 5),
         ],
-      _buildLegendStrip(compact: true),
+      _buildLegendStrip(items: items, compact: true),
     ];
   }
 
@@ -1338,7 +1465,10 @@ class PdfService {
     );
   }
 
-  static pw.Widget _buildLegendStrip({required bool compact}) {
+  static pw.Widget _buildLegendStrip({
+    required List<_PdfElementGuideItem> items,
+    required bool compact,
+  }) {
     return pw.Container(
       width: double.infinity,
       padding: pw.EdgeInsets.symmetric(horizontal: compact ? 6 : 8, vertical: compact ? 5 : 6),
@@ -1356,7 +1486,8 @@ class PdfService {
         alignment: pw.WrapAlignment.center,
         spacing: compact ? 7 : 10,
         runSpacing: 4,
-        children: CombineElementMeta.all.map((m) {
+        children: items.map((item) {
+          final m = item.meta;
           return pw.Row(
             mainAxisSize: pw.MainAxisSize.min,
             crossAxisAlignment: pw.CrossAxisAlignment.center,
