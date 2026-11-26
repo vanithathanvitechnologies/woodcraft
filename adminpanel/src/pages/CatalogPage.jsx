@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { apiRequest, formatINR, mediaUrl } from '../api';
+import { apiRequest, mediaUrl } from '../api';
 
 const WOOD_SPECIES = [
   'Burma Teak',
@@ -19,7 +19,6 @@ const EMPTY_FORM = {
   category: 'Door',
   wood_species: 'Burma Teak',
   carving_style: '',
-  base_price: '32000',
   tags: '',
   description: '',
   is_trending: false,
@@ -168,7 +167,6 @@ export default function CatalogPage() {
       category: d.category || categoryNames[0] || 'Door',
       wood_species: d.wood_species || WOOD_SPECIES[0],
       carving_style: d.carving_style || '',
-      base_price: String(Number(d.base_price || 0)),
       tags: d.tags || '',
       description: d.description || '',
       is_trending: Boolean(Number(d.is_trending)),
@@ -233,7 +231,6 @@ export default function CatalogPage() {
         fd.append('category', form.category);
         fd.append('wood_species', form.wood_species);
         fd.append('carving_style', form.carving_style.trim());
-        fd.append('base_price', String(Number(form.base_price) || 0));
         fd.append('tags', form.tags.trim());
         fd.append('description', form.description.trim());
         fd.append('is_trending', form.is_trending ? '1' : '0');
@@ -259,7 +256,6 @@ export default function CatalogPage() {
             category: form.category,
             wood_species: form.wood_species,
             carving_style: form.carving_style.trim(),
-            base_price: Number(form.base_price) || 0,
             tags: form.tags.trim(),
             description: form.description.trim(),
             is_trending: form.is_trending,
@@ -434,7 +430,6 @@ export default function CatalogPage() {
                         url: imgUrl,
                         title: d.title,
                         subtitle: `${d.wood_species} • ${d.category}${d.carving_style ? ` • ${d.carving_style}` : ''}`,
-                        price: formatINR(d.base_price),
                       })
                     }
                   >
@@ -458,7 +453,6 @@ export default function CatalogPage() {
                         {d.carving_style}
                       </div>
                     )}
-                    <div className="catalog-card-price">{formatINR(d.base_price)}</div>
 
                     <div className="catalog-card-actions">
                       <button className="btn btn-outline btn-sm" onClick={() => openEdit(d)}>
@@ -600,19 +594,6 @@ export default function CatalogPage() {
               </div>
 
               <div className="form-field">
-                <label>Base Price (₹) *</label>
-                <input
-                  className="input"
-                  type="number"
-                  min={0}
-                  required
-                  value={form.base_price}
-                  onChange={(e) => setForm({ ...form, base_price: e.target.value })}
-                  placeholder="35000"
-                />
-              </div>
-
-              <div className="form-field">
                 <label>Carving Style</label>
                 <input
                   className="input"
@@ -694,7 +675,7 @@ export default function CatalogPage() {
               <div>
                 <h3 style={{ fontSize: 16 }}>{lightbox.title}</h3>
                 <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-                  {lightbox.subtitle} • <strong style={{ color: 'var(--wood-primary)' }}>{lightbox.price}</strong>
+                  {lightbox.subtitle}
                 </div>
               </div>
               <button className="btn btn-outline btn-sm" onClick={() => setLightbox(null)}>

@@ -15,8 +15,8 @@ class AiCombinerTab extends StatefulWidget {
 }
 
 class _AiCombinerTabState extends State<AiCombinerTab> {
-  final _inr = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
   List<dynamic> _catalog = [];
+  List<Map<String, dynamic>> _productionMembers = [];
   List<String> _categories = List<String>.from(AppConstants.woodworkCategories);
   bool _loadingCatalog = true;
 
@@ -46,20 +46,36 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
   List<PictorialElementItem> _aiBreakdownItems = [];
   double _aiOutputAspect = 0.75;
 
-  // Customer & Billing
+  // Customer & Production Assignment (Zero amount fields)
   final _custNameCtrl = TextEditingController();
   final _custMobileCtrl = TextEditingController();
   final _custAddressCtrl = TextEditingController();
-  final _totalCostCtrl = TextEditingController(text: '55000');
-  final _advanceCtrl = TextEditingController(text: '20000');
+  final _productionPlaceCtrl = TextEditingController();
+  int? _selectedProductionUserId;
   String _priority = 'Normal';
   DateTime _deliveryDate = DateTime.now().add(const Duration(days: 14));
   bool _savingOrder = false;
+  Map<String, dynamic>? _lastSavedOrder;
 
   @override
   void initState() {
     super.initState();
     _loadCatalog();
+  }
+
+  @override
+  void dispose() {
+    _widthCtrl.dispose();
+    _heightCtrl.dispose();
+    _carvingCtrl.dispose();
+    _hardwareCtrl.dispose();
+    _qtyCtrl.dispose();
+    _notesCtrl.dispose();
+    _custNameCtrl.dispose();
+    _custMobileCtrl.dispose();
+    _custAddressCtrl.dispose();
+    _productionPlaceCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _loadCatalog() async {
@@ -69,12 +85,18 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
       final categoriesFuture = ApiService.instance
           .get('/categories')
           .catchError((_) => <String, dynamic>{});
+      final teamFuture = ApiService.instance
+          .get('/production/team')
+          .catchError((_) => <String, dynamic>{});
 
-      final results = await Future.wait([catalogFuture, categoriesFuture]);
+      final results = await Future.wait([catalogFuture, categoriesFuture, teamFuture]);
       if (!mounted) return;
 
       final designs = (results[0]['designs'] as List?) ?? [];
       final rawCats = (results[1]['categories'] as List?) ?? [];
+      final rawTeam = (results[2]['members'] as List?) ?? [];
+      final teamList = rawTeam.whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList();
+
       final dynamicCats = rawCats
           .map((c) => (c is Map ? (c['name'] ?? '') : c).toString().trim())
           .where((name) => name.isNotEmpty)
@@ -95,6 +117,11 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
 
       setState(() {
         _catalog = designs;
+        _productionMembers = teamList;
+        if (_selectedProductionUserId != null &&
+            !_productionMembers.any((m) => int.tryParse('${m['id']}') == _selectedProductionUserId)) {
+          _selectedProductionUserId = null;
+        }
         _categories = mergedCats;
         if (_categories.isNotEmpty) {
           final matchedIdx = _categories.indexWhere((c) => c.toLowerCase() == _category.toLowerCase());
@@ -364,10 +391,6 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
         _aiElementRegions = _parseElementRegions(res['element_regions']);
         _aiBreakdownItems = _buildBreakdownItems(res['element_breakdown']);
         _aiOutputAspect = (res['output_aspect'] as num?)?.toDouble() ?? 0.75;
-        final est = res['cost_estimate'] as Map<String, dynamic>?;
-        if (est != null) {
-          _totalCostCtrl.text = '${est['total_estimated_cost']}';
-        }
       });
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
@@ -376,19 +399,86 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
     }
   }
 
-  Future<void> _confirmAndDispatchOrder() async {
-    if (_custNameCtrl.text.trim().isEmpty || _custMobileCtrl.text.trim().length < 10) {
+  String _selectedProductionMemberName() {
+    if (_selectedProductionUserId == null) return 'Production Team Workshop';
+    final matched = _productionMembers.firstWhere(
+      (m) => int.tryParse('${m['id']}') == _selectedProductionUserId,
+      orElse: () => <String, dynamic>{},
+    );
+    return (matched['name'] ?? 'Production Team').toString();
+  }
+
+  Future<void> _submitOrderFlow() async {
+    final custName = _custNameCtrl.text.trim();
+    final custMobile = _custMobileCtrl.text.trim();
+    if (custName.isEmpty || custMobile.length < 10) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Enter Customer Name and valid 10-digit Mobile Number')),
       );
       return;
     }
 
+    if (_productionMembers.isNotEmpty && _selectedProductionUserId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a Production Team member to send this order to')),
+      );
+      return;
+    }
+
+    final place = _productionPlaceCtrl.text.trim();
+    final memberName = _selectedProductionMemberName();
+
+    // Step A: Review & click Done to save
+    final confirmedDone = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.fact_check_rounded, color: AppTheme.woodPrimary),
+            SizedBox(width: 8),
+            Expanded(child: Text('Confirm Order Submission', style: TextStyle(fontSize: 16.5))),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Customer: $custName ($custMobile)', style: const TextStyle(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 6),
+            Text('Category: $_category • $_woodSpecies (${_widthCtrl.text}" × ${_heightCtrl.text}")'),
+            const SizedBox(height: 6),
+            Text('Send To (Production): $memberName',
+                style: const TextStyle(fontWeight: FontWeight.w700, color: AppTheme.woodPrimary)),
+            const SizedBox(height: 4),
+            Text('Production Place: ${place.isNotEmpty ? place : 'Optional — Not specified'}'),
+            const SizedBox(height: 4),
+            Text('Delivery Date: ${DateFormat('yyyy-MM-dd').format(_deliveryDate)} • $_priority'),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Back')),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.success),
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.check_circle_rounded, size: 18),
+            label: const Text('Done'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmedDone == true) {
+      await _saveAndNotifyOrder();
+    }
+  }
+
+  Future<void> _saveAndNotifyOrder() async {
     setState(() => _savingOrder = true);
     try {
       final refElements = _selectedElements.entries
           .map((e) => {'design_id': e.key, 'element': e.value})
           .toList();
+      final place = _productionPlaceCtrl.text.trim();
 
       final res = await ApiService.instance.post('/orders', {
         'customer_name': _custNameCtrl.text.trim(),
@@ -410,8 +500,8 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
         'reference_design_ids': _selectedElements.keys.toList(),
         'reference_elements': refElements,
         'ai_output_image_url': _aiImageUrl ?? '',
-        'total_cost': double.tryParse(_totalCostCtrl.text) ?? 0,
-        'advance_amount': double.tryParse(_advanceCtrl.text) ?? 0,
+        'assigned_production_user_id': _selectedProductionUserId,
+        'production_place': place,
         'expected_delivery_date': DateFormat('yyyy-MM-dd').format(_deliveryDate),
         'priority': _priority,
         'is_dispatched': true,
@@ -446,17 +536,45 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
       }
       if (!mounted) return;
 
+      final assignedLabel = (createdOrder['assigned_production_user_name'] ?? _selectedProductionMemberName()).toString();
+      final savedPlace = (createdOrder['production_place'] ?? place).toString().trim();
+
+      setState(() {
+        _lastSavedOrder = createdOrder;
+        _custNameCtrl.clear();
+        _custMobileCtrl.clear();
+        _custAddressCtrl.clear();
+        _productionPlaceCtrl.clear();
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: AppTheme.success,
+          content: Text('Order ${createdOrder['job_id']} saved successfully & sent to $assignedLabel!'),
+        ),
+      );
+
       showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: Text('Order ${createdOrder['job_id']} Dispatched!'),
+          title: Row(
+            children: [
+              const Icon(Icons.check_circle_rounded, color: AppTheme.success),
+              const SizedBox(width: 8),
+              Expanded(child: Text('Order ${createdOrder['job_id']} Saved!')),
+            ],
+          ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Order saved & sent to Production Team Workshop.'),
+              const Text('Order saved successfully and dispatched to the Production Team.',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
               const SizedBox(height: 8),
-              Text('Customer can now track live progress in the Customer App using mobile: ${createdOrder['customer_mobile']}'),
+              Text('Assigned Production Member: $assignedLabel'),
+              if (savedPlace.isNotEmpty) Text('Production Place: $savedPlace'),
+              const SizedBox(height: 8),
+              Text('Customer can track live progress in the Customer App using mobile: ${createdOrder['customer_mobile']}'),
             ],
           ),
           actions: [
@@ -470,7 +588,7 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
             ),
             ElevatedButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Done'),
+              child: const Text('OK'),
             ),
           ],
         ),
@@ -484,9 +602,6 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
 
   @override
   Widget build(BuildContext context) {
-    final total = double.tryParse(_totalCostCtrl.text) ?? 0;
-    final advance = double.tryParse(_advanceCtrl.text) ?? 0;
-    final balance = (total - advance).clamp(0, double.infinity);
     final filteredCatalog = _filteredCatalog;
 
     return ListView(
@@ -1111,14 +1226,14 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
         ],
         const SizedBox(height: 12),
 
-        // Step 4: Customer Details, Billing & One-Tap Dispatch
+        // Step 4: Customer Details, Production Assignment & Submit (Zero Amounts)
         Card(
           child: Padding(
             padding: const EdgeInsets.all(14),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('4. Customer Details, Billing & Dispatch',
+                const Text('4. Customer Details & Send to Production',
                     style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.woodDark)),
                 const Text('Customer mobile number automatically enables Customer App OTP login',
                     style: TextStyle(fontSize: 11.5, color: Colors.black54)),
@@ -1137,30 +1252,35 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
                   decoration: const InputDecoration(labelText: 'Delivery Address'),
                 ),
                 const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _totalCostCtrl,
-                        keyboardType: TextInputType.number,
-                        onChanged: (_) => setState(() {}),
-                        decoration: const InputDecoration(labelText: 'Total Cost (₹)'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: TextField(
-                        controller: _advanceCtrl,
-                        keyboardType: TextInputType.number,
-                        onChanged: (_) => setState(() {}),
-                        decoration: const InputDecoration(labelText: 'Advance Paid (₹)'),
-                      ),
-                    ),
-                  ],
+                DropdownButtonFormField<int>(
+                  key: ValueKey('prod_member_$_selectedProductionUserId'),
+                  initialValue: _productionMembers.any((m) => int.tryParse('${m['id']}') == _selectedProductionUserId)
+                      ? _selectedProductionUserId
+                      : null,
+                  decoration: InputDecoration(
+                    labelText: 'Send to Production Team Member${_productionMembers.isNotEmpty ? ' *' : ''}',
+                    prefixIcon: const Icon(Icons.engineering_rounded),
+                  ),
+                  hint: Text(_productionMembers.isEmpty
+                      ? 'No active production members found'
+                      : 'Select production team member'),
+                  items: _productionMembers.map((m) {
+                    final id = int.tryParse('${m['id']}') ?? 0;
+                    final phone = (m['phone'] ?? '').toString().trim();
+                    final label = phone.isNotEmpty ? '${m['name']} ($phone)' : '${m['name']}';
+                    return DropdownMenuItem<int>(value: id, child: Text(label));
+                  }).toList(),
+                  onChanged: (v) => setState(() => _selectedProductionUserId = v),
                 ),
-                const SizedBox(height: 8),
-                Text('Balance Payable: ${_inr.format(balance)}',
-                    style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.danger)),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _productionPlaceCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Production Place (Optional)',
+                    hintText: 'e.g. Workshop Bay 2 / Timber Unit',
+                    prefixIcon: Icon(Icons.location_city_rounded),
+                  ),
+                ),
                 const SizedBox(height: 10),
                 Row(
                   children: [
@@ -1196,11 +1316,55 @@ class _AiCombinerTabState extends State<AiCombinerTab> {
                   width: double.infinity,
                   child: ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(backgroundColor: AppTheme.success),
-                    onPressed: _savingOrder ? null : _confirmAndDispatchOrder,
-                    icon: const Icon(Icons.send),
-                    label: Text(_savingOrder ? 'Saving...' : 'Confirm Order & Send to Production'),
+                    onPressed: _savingOrder ? null : _submitOrderFlow,
+                    icon: const Icon(Icons.send_rounded),
+                    label: Text(_savingOrder ? 'Saving...' : 'Submit Order'),
                   ),
                 ),
+                if (_lastSavedOrder != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.success.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.success.withValues(alpha: 0.4)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.check_circle_rounded, color: AppTheme.success, size: 20),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Saved: Order ${_lastSavedOrder!['job_id']} sent to ${_lastSavedOrder!['assigned_production_user_name'] ?? 'Production Team'}!',
+                                style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.success, fontSize: 13),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: () => PdfService.printCustomerCopy(_lastSavedOrder!, context: context),
+                              icon: const Icon(Icons.picture_as_pdf_rounded, size: 16),
+                              label: const Text('Customer Copy'),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: () => PdfService.printWorkshopJobSheet(_lastSavedOrder!, context: context),
+                              icon: const Icon(Icons.print_rounded, size: 16),
+                              label: const Text('Workshop Sheet'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ],
             ),
           ),

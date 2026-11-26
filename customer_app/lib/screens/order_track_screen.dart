@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import '../services/customer_api_service.dart';
 
 class OrderTrackScreen extends StatefulWidget {
@@ -17,9 +16,7 @@ class _OrderTrackScreenState extends State<OrderTrackScreen> {
   static const _bg = Color(0xFFF7F4EF);
   static const _border = Color(0xFFEBE4DA);
   static const _success = Color(0xFF1B8A5A);
-  static const _danger = Color(0xFFD13B34);
 
-  final _inr = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
   Map<String, dynamic>? _order;
   List<dynamic> _stages = [];
   bool _loading = true;
@@ -267,36 +264,6 @@ class _OrderTrackScreenState extends State<OrderTrackScreen> {
             ),
             const SizedBox(height: 14),
 
-            // Payment Summary Pills Card
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: _border),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _sectionTitle(Icons.account_balance_wallet_rounded, 'Payment Summary'),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      _moneyCard(Icons.receipt_long_rounded, 'Total',
-                          _inr.format(double.tryParse('${o['total_cost']}') ?? 0), _woodDark),
-                      const SizedBox(width: 8),
-                      _moneyCard(Icons.check_circle_rounded, 'Paid',
-                          _inr.format(double.tryParse('${o['advance_amount']}') ?? 0), _success),
-                      const SizedBox(width: 8),
-                      _moneyCard(Icons.pending_actions_rounded, 'Balance',
-                          _inr.format(double.tryParse('${o['balance_amount']}') ?? 0), _danger),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-
             // 8-Stage Visual Icon Timeline
             Container(
               padding: const EdgeInsets.all(16),
@@ -538,34 +505,6 @@ class _OrderTrackScreenState extends State<OrderTrackScreen> {
         const SizedBox(width: 10),
         Text(title, style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800, color: _woodDark)),
       ],
-    );
-  }
-
-  Widget _moneyCard(IconData icon, String label, String val, Color color) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: color.withValues(alpha: 0.2)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(icon, size: 13, color: color),
-                const SizedBox(width: 4),
-                Text(label, style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: color)),
-              ],
-            ),
-            const SizedBox(height: 5),
-            Text(val, maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: color)),
-          ],
-        ),
-      ),
     );
   }
 

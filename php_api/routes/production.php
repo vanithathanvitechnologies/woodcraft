@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/../helpers/notifications.php';
 
 // STRICT PRIVACY-PROTECTED COLUMNS ONLY — ZERO Customer Name, Mobile, Address, or Pricing!
 const RESTRICTED_JOB_COLS = '
@@ -8,6 +9,8 @@ const RESTRICTED_JOB_COLS = '
   o.workshop_notes, o.reference_design_ids, o.reference_elements,
   o.ai_output_image_url, o.expected_delivery_date, o.priority,
   o.current_stage, o.current_stage_name, o.has_blocker, o.blocker_note,
+  o.production_place, o.assigned_production_user_id,
+  pu.name AS assigned_production_user_name,
   o.created_at, o.updated_at
 ';
 
@@ -51,35 +54,55 @@ function enrichRestrictedJobPhp(PDO $pdo, array $job): array {
 function handleProductionRoutes(string $method, array $segments): void {
     $pdo = getDb();
 
+    // GET /api/production/team — Active production members list for order assignment
+    if ($method === 'GET' && ($segments[0] ?? '') === 'team') {
+        requireRoles(['admin', 'owner', 'sales', 'production']);
+        $stmt = $pdo->query("SELECT id, name, phone FROM users WHERE role = 'production' AND is_active = 1 ORDER BY name ASC");
+        jsonResponse(['success' => true, 'members' => $stmt->fetchAll()]);
+    }
+
     if (($segments[0] ?? '') !== 'jobs') {
         jsonResponse(['success' => false, 'message' => 'Production endpoint not found'], 404);
     }
 
     // GET /api/production/jobs
     if ($method === 'GET' && !isset($segments[1])) {
-        requireRoles(['production', 'owner', 'sales', 'admin']);
+        $authUser = requireRoles(['production', 'owner', 'sales', 'admin']);
         $filter = $_GET['filter'] ?? 'all';
         $search = trim((string)($_GET['search'] ?? ''));
 
-        $sql = 'SELECT ' . RESTRICTED_JOB_COLS . ' FROM orders o WHERE o.is_dispatched = 1';
+        $sql = 'SELECT ' . RESTRICTED_JOB_COLS . ',
+                       DATEDIFF(o.expected_delivery_date, CURDATE()) AS days_left
+                FROM orders o
+                LEFT JOIN users pu ON pu.id = o.assigned_production_user_id
+                WHERE o.is_dispatched = 1';
         $params = [];
+        if (($authUser['role'] ?? '') === 'production') {
+            $sql .= ' AND (o.assigned_production_user_id = ? OR o.assigned_production_user_id IS NULL)';
+            $params[] = (int)$authUser['id'];
+        }
         if ($filter === 'new') $sql .= ' AND o.current_stage = 1';
         elseif ($filter === 'in_progress') $sql .= ' AND o.current_stage > 1 AND o.current_stage < 8';
         elseif ($filter === 'completed') $sql .= ' AND o.current_stage = 8';
 
         if ($search !== '') {
-            $sql .= ' AND (o.job_id LIKE ? OR o.woodwork_category LIKE ? OR o.wood_species LIKE ? OR o.carving_pattern LIKE ?)';
+            $sql .= ' AND (o.job_id LIKE ? OR o.woodwork_category LIKE ? OR o.wood_species LIKE ? OR o.carving_pattern LIKE ? OR o.production_place LIKE ?)';
             $like = "%$search%";
-            array_push($params, $like, $like, $like, $like);
+            array_push($params, $like, $like, $like, $like, $like);
         }
 
         $sql .= ' ORDER BY FIELD(o.priority, "Urgent", "High", "Normal"), o.expected_delivery_date ASC';
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         $rows = $stmt->fetchAll();
+        $today = date('Y-m-d');
         foreach ($rows as &$r) {
             $r['reference_design_ids'] = parseJsonField($r['reference_design_ids'] ?? null, []);
             $r['reference_elements'] = parseJsonField($r['reference_elements'] ?? null, []);
+            $stageNum = (int)$r['current_stage'];
+            $daysLeft = (int)($r['days_left'] ?? 0);
+            $r['is_delivery_reached'] = ($stageNum < 8 && $r['expected_delivery_date'] <= $today);
+            $r['is_due_soon'] = ($stageNum < 8 && $r['expected_delivery_date'] > $today && $daysLeft <= 2);
         }
         jsonResponse(['success' => true, 'stages' => PRODUCTION_STAGES, 'jobs' => $rows]);
     }
@@ -87,7 +110,7 @@ function handleProductionRoutes(string $method, array $segments): void {
     // GET /api/production/jobs/by-job-id/:jobId
     if ($method === 'GET' && ($segments[1] ?? '') === 'by-job-id' && !empty($segments[2])) {
         requireRoles(['production', 'owner', 'sales', 'admin']);
-        $stmt = $pdo->prepare('SELECT ' . RESTRICTED_JOB_COLS . ' FROM orders o WHERE o.job_id = ? LIMIT 1');
+        $stmt = $pdo->prepare('SELECT ' . RESTRICTED_JOB_COLS . ' FROM orders o LEFT JOIN users pu ON pu.id = o.assigned_production_user_id WHERE o.job_id = ? LIMIT 1');
         $stmt->execute([trim($segments[2])]);
         $job = $stmt->fetch();
         if (!$job) jsonResponse(['success' => false, 'message' => 'Job ID not found'], 404);
@@ -99,11 +122,45 @@ function handleProductionRoutes(string $method, array $segments): void {
     // GET /api/production/jobs/:id
     if ($method === 'GET' && $id !== null && !isset($segments[2])) {
         requireRoles(['production', 'owner', 'sales', 'admin']);
-        $stmt = $pdo->prepare('SELECT ' . RESTRICTED_JOB_COLS . ' FROM orders o WHERE o.id = ? LIMIT 1');
+        $stmt = $pdo->prepare('SELECT ' . RESTRICTED_JOB_COLS . ' FROM orders o LEFT JOIN users pu ON pu.id = o.assigned_production_user_id WHERE o.id = ? LIMIT 1');
         $stmt->execute([$id]);
         $job = $stmt->fetch();
         if (!$job) jsonResponse(['success' => false, 'message' => 'Job not found'], 404);
         jsonResponse(['success' => true, 'job' => enrichRestrictedJobPhp($pdo, $job), 'stages' => PRODUCTION_STAGES]);
+    }
+
+    // PATCH /api/production/jobs/:id/assign
+    if (($method === 'PATCH' || $method === 'POST') && $id !== null && ($segments[2] ?? '') === 'assign') {
+        requireRoles(['owner', 'admin', 'sales']);
+        $body = getJsonBody();
+        $fields = [];
+        $params = [];
+        $assignedUpdated = false;
+        if (array_key_exists('assigned_production_user_id', $body)) {
+            $fields[] = 'assigned_production_user_id = ?';
+            $params[] = !empty($body['assigned_production_user_id']) ? (int)$body['assigned_production_user_id'] : null;
+            $assignedUpdated = true;
+        }
+        if (array_key_exists('production_place', $body)) {
+            $place = trim((string)($body['production_place'] ?? ''));
+            $fields[] = 'production_place = ?';
+            $params[] = $place !== '' ? $place : null;
+        }
+        if (!$fields) jsonResponse(['success' => false, 'message' => 'Nothing to update'], 400);
+
+        $params[] = $id;
+        $pdo->prepare('UPDATE orders SET ' . implode(', ', $fields) . ' WHERE id = ?')->execute($params);
+
+        $stmt = $pdo->prepare('SELECT ' . RESTRICTED_JOB_COLS . ' FROM orders o LEFT JOIN users pu ON pu.id = o.assigned_production_user_id WHERE o.id = ?');
+        $stmt->execute([$id]);
+        $job = $stmt->fetch();
+        if (!$job) jsonResponse(['success' => false, 'message' => 'Job not found'], 404);
+
+        if ($assignedUpdated) {
+            notifyOrderAssignedPhp($pdo, $job);
+        }
+        syncDeliveryNotificationsPhp($pdo);
+        jsonResponse(['success' => true, 'message' => 'Production assignment saved', 'job' => enrichRestrictedJobPhp($pdo, $job)]);
     }
 
     // PATCH /api/production/jobs/:id/stage
@@ -133,7 +190,9 @@ function handleProductionRoutes(string $method, array $segments): void {
             'INSERT INTO order_stage_history (order_id, stage_number, stage_name, updated_by, notes, is_blocker) VALUES (?, ?, ?, ?, ?, 0)'
         )->execute([$id, $stageNum, $stageName, $authUser['id'], $notes ?: "Moved to $stageName"]);
 
-        $stmt = $pdo->prepare('SELECT ' . RESTRICTED_JOB_COLS . ' FROM orders o WHERE o.id = ?');
+        syncDeliveryNotificationsPhp($pdo);
+
+        $stmt = $pdo->prepare('SELECT ' . RESTRICTED_JOB_COLS . ' FROM orders o LEFT JOIN users pu ON pu.id = o.assigned_production_user_id WHERE o.id = ?');
         $stmt->execute([$id]);
         jsonResponse(['success' => true, 'job' => enrichRestrictedJobPhp($pdo, $stmt->fetch())]);
     }

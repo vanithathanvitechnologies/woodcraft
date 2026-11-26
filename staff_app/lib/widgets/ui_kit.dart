@@ -125,33 +125,40 @@ class UiKit {
     );
   }
 
-  static Widget moneyPill(IconData icon, String label, String amount, Color color) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withValues(alpha: 0.22)),
+  static Widget notificationBellButton({
+    required int unreadCount,
+    required VoidCallback onPressed,
+  }) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        IconButton(
+          tooltip: 'Notifications',
+          onPressed: onPressed,
+          icon: const Icon(Icons.notifications_rounded),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(icon, size: 13, color: color),
-                const SizedBox(width: 4),
-                Text(label, style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: color)),
-              ],
+        if (unreadCount > 0)
+          Positioned(
+            right: 6,
+            top: 6,
+            child: IgnorePointer(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                decoration: BoxDecoration(
+                  color: AppTheme.danger,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.white, width: 1.2),
+                ),
+                constraints: const BoxConstraints(minWidth: 18, minHeight: 16),
+                child: Text(
+                  unreadCount > 99 ? '99+' : '$unreadCount',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w900),
+                ),
+              ),
             ),
-            const SizedBox(height: 4),
-            Text(amount,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: color)),
-          ],
-        ),
-      ),
+          ),
+      ],
     );
   }
 
@@ -181,7 +188,6 @@ class UiKit {
     required String imageUrl,
     String? title,
     String? subtitle,
-    String? priceText,
     String? badge,
   }) {
     if (imageUrl.isEmpty) return;
@@ -192,7 +198,6 @@ class UiKit {
         imageUrl: imageUrl,
         title: title,
         subtitle: subtitle,
-        priceText: priceText,
         badge: badge,
       ),
     );
@@ -203,14 +208,12 @@ class _FullImagePopupDialog extends StatefulWidget {
   final String imageUrl;
   final String? title;
   final String? subtitle;
-  final String? priceText;
   final String? badge;
 
   const _FullImagePopupDialog({
     required this.imageUrl,
     this.title,
     this.subtitle,
-    this.priceText,
     this.badge,
   });
 
@@ -246,8 +249,7 @@ class _FullImagePopupDialogState extends State<_FullImagePopupDialog> {
     final maxW = (size.width * 0.96).clamp(280.0, 1180.0);
     final maxH = (size.height * 0.94).clamp(320.0, 1040.0);
     final hasFooter = (widget.title != null && widget.title!.isNotEmpty) ||
-        (widget.subtitle != null && widget.subtitle!.isNotEmpty) ||
-        (widget.priceText != null && widget.priceText!.isNotEmpty);
+        (widget.subtitle != null && widget.subtitle!.isNotEmpty);
 
     return Dialog(
       backgroundColor: Colors.transparent,
@@ -431,17 +433,6 @@ class _FullImagePopupDialogState extends State<_FullImagePopupDialog> {
                           ],
                         ),
                       ),
-                      if (widget.priceText != null && widget.priceText!.isNotEmpty) ...[
-                        const SizedBox(width: 12),
-                        Text(
-                          widget.priceText!,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w900,
-                            fontSize: 16,
-                            color: AppTheme.woodPrimary,
-                          ),
-                        ),
-                      ],
                     ],
                   ),
                 ),

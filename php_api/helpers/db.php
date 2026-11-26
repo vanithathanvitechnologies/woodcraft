@@ -10,8 +10,41 @@ function getDb(): PDO {
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES => false,
         ]);
+        ensureAppSchemaPhp($pdo);
     }
     return $pdo;
+}
+
+function ensureAppSchemaPhp(PDO $pdo): void {
+    static $checked = false;
+    if ($checked) return;
+    $checked = true;
+    try {
+        $col = $pdo->query("SHOW COLUMNS FROM orders LIKE 'production_place'")->fetch();
+        if (!$col) {
+            $pdo->exec('ALTER TABLE orders ADD COLUMN production_place VARCHAR(180) NULL AFTER assigned_production_user_id');
+        }
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS notifications (
+              id INT AUTO_INCREMENT PRIMARY KEY,
+              user_id INT NOT NULL,
+              order_id INT NOT NULL,
+              type VARCHAR(50) NOT NULL,
+              title VARCHAR(180) NOT NULL,
+              message TEXT NOT NULL,
+              notify_for_date DATE NULL,
+              is_read TINYINT(1) NOT NULL DEFAULT 0,
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE KEY uniq_user_order_type_date (user_id, order_id, type, notify_for_date),
+              INDEX idx_notif_user_read (user_id, is_read),
+              INDEX idx_notif_order (order_id),
+              CONSTRAINT fk_notif_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+              CONSTRAINT fk_notif_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+        );
+    } catch (Throwable $e) {
+        // Ignore if schema doesn't exist yet (e.g. during initial seed)
+    }
 }
 
 function jsonResponse($data, int $status = 200): void {

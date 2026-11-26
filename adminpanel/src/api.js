@@ -61,7 +61,3 @@ export async function apiRequest(endpoint, options = {}) {
   }
   return data;
 }
-
-export function formatINR(amount) {
-  return `₹${Number(amount || 0).toLocaleString('en-IN')}`;
-}

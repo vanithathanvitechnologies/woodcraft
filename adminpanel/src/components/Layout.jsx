@@ -1,6 +1,28 @@
+import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
+import { apiRequest } from '../api';
 
 export default function Layout({ user, onLogout, children }) {
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    async function loadUnread() {
+      try {
+        const data = await apiRequest('/notifications');
+        if (active) setUnreadCount(Number(data.unread_count || 0));
+      } catch {
+        // Ignore transient polling failures
+      }
+    }
+    loadUnread();
+    const timer = setInterval(loadUnread, 45000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, []);
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -31,6 +53,24 @@ export default function Layout({ user, onLogout, children }) {
           </NavLink>
           <NavLink to="/orders" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
             <span>🚪</span> Orders & Tracking
+          </NavLink>
+          <NavLink to="/notifications" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+            <span>🔔</span> Notifications
+            {unreadCount > 0 && (
+              <span
+                style={{
+                  marginLeft: 'auto',
+                  background: '#b83227',
+                  color: '#fff',
+                  borderRadius: 999,
+                  padding: '2px 8px',
+                  fontSize: 11,
+                  fontWeight: 800,
+                }}
+              >
+                {unreadCount}
+              </span>
+            )}
           </NavLink>
           <NavLink to="/users" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
             <span>🔐</span> Staff & Role Access

@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import '../../core/app_theme.dart';
 import '../../services/api_service.dart';
 import '../../widgets/ui_kit.dart';
 
 class OwnerDashboardTab extends StatefulWidget {
-  final void Function(int tabIndex) onNavigateTab;
+  final void Function(int tabIndex, {String? ordersFilter}) onNavigateTab;
   const OwnerDashboardTab({super.key, required this.onNavigateTab});
 
   @override
@@ -13,9 +12,9 @@ class OwnerDashboardTab extends StatefulWidget {
 }
 
 class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
-  final _inr = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
   Map<String, dynamic>? _kpis;
-  List<dynamic> _recentOrders = [];
+  List<Map<String, dynamic>> _pendingOrders = [];
+  List<Map<String, dynamic>> _dueReachedOrders = [];
   bool _loading = true;
 
   @override
@@ -29,11 +28,18 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
     try {
       final results = await Future.wait([
         ApiService.instance.get('/reports/summary'),
-        ApiService.instance.get('/orders'),
+        ApiService.instance.get('/orders?pending_only=true'),
       ]);
+      final rawPending = (results[1]['orders'] as List?) ?? [];
+      final pendingList = rawPending.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+      final reachedList = pendingList
+          .where((o) => o['is_delivery_reached'] == true || o['is_delayed'] == true)
+          .toList();
+
       setState(() {
         _kpis = Map<String, dynamic>.from(results[0]['kpis'] as Map);
-        _recentOrders = ((results[1]['orders'] as List?) ?? []).take(5).toList();
+        _pendingOrders = pendingList;
+        _dueReachedOrders = reachedList;
       });
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
@@ -42,80 +48,162 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
     }
   }
 
+  Widget _orderPreviewCard(Map<String, dynamic> o, {required bool highlightDueReached}) {
+    final stage = int.tryParse('${o['current_stage']}') ?? 1;
+    final prodMember = (o['assigned_production_user_name'] ?? '').toString().trim();
+    final prodPlace = (o['production_place'] ?? '').toString().trim();
+    final daysLeft = int.tryParse('${o['days_left']}') ?? 0;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: () => widget.onNavigateTab(1, ordersFilter: highlightDueReached ? 'due_reached' : 'pending'),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: highlightDueReached ? const Color(0xFFFFF5F5) : Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: highlightDueReached ? AppTheme.danger.withValues(alpha: 0.45) : AppTheme.border,
+          ),
+          boxShadow: [
+            BoxShadow(color: AppTheme.woodDark.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 4)),
+          ],
+        ),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Container(
+                width: 50,
+                height: 68,
+                padding: const EdgeInsets.all(2),
+                color: Colors.white,
+                child: (o['ai_output_image_url'] ?? '').toString().isNotEmpty
+                    ? Image.network(
+                        ApiService.instance.mediaUrl(o['ai_output_image_url'].toString()),
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, __, ___) =>
+                            const Icon(Icons.door_front_door_rounded, color: AppTheme.woodPrimary),
+                      )
+                    : const Icon(Icons.door_front_door_rounded, color: AppTheme.woodPrimary),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text('#${o['job_id']}',
+                          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: AppTheme.woodDark)),
+                      const Spacer(),
+                      UiKit.iconChip(
+                        Icons.event_available_rounded,
+                        highlightDueReached
+                            ? (daysLeft == 0 ? 'Reached Today' : 'Overdue ${daysLeft.abs()}d')
+                            : '${o['expected_delivery_date']}',
+                        color: highlightDueReached ? AppTheme.danger : AppTheme.textMuted,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '${o['customer_name']} • ${o['woodwork_category']} (${o['wood_species']})',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppTheme.textDark),
+                  ),
+                  const SizedBox(height: 5),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 5,
+                    children: [
+                      UiKit.iconChip(
+                        UiKit.stageIcon(stage),
+                        'Stage $stage/8 • ${o['current_stage_name']}',
+                        color: stage >= 4 ? AppTheme.warning : AppTheme.info,
+                      ),
+                      if (prodMember.isNotEmpty)
+                        UiKit.iconChip(Icons.engineering_rounded, prodMember, color: AppTheme.woodPrimary),
+                      if (prodPlace.isNotEmpty)
+                        UiKit.iconChip(Icons.location_city_rounded, prodPlace, color: AppTheme.info),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
     final k = _kpis ?? {};
+    final pendingCount = int.tryParse('${k['pending_orders'] ?? k['active_orders']}') ?? _pendingOrders.length;
+    final dueReachedCount =
+        int.tryParse('${k['delivery_reached_incomplete_orders'] ?? k['delayed_orders']}') ?? _dueReachedOrders.length;
+    final dueSoonCount = int.tryParse('${k['due_soon_orders']}') ?? 0;
 
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // Total Orders Hero Card
-          Container(
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppTheme.border),
-              boxShadow: [
-                BoxShadow(
-                  color: AppTheme.woodDark.withValues(alpha: 0.05),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
+          if (dueReachedCount > 0 || dueSoonCount > 0)
+            Container(
+              margin: const EdgeInsets.only(bottom: 14),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: dueReachedCount > 0 ? const Color(0xFFFDECEC) : const Color(0xFFFFF5EB),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: (dueReachedCount > 0 ? AppTheme.danger : AppTheme.warning).withValues(alpha: 0.45),
                 ),
-              ],
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Total Orders',
-                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.textMuted)),
-                      const SizedBox(height: 6),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text(
-                            '${k['total_orders'] ?? 0}',
-                            style: const TextStyle(
-                                fontSize: 32, fontWeight: FontWeight.w900, color: AppTheme.woodDark, height: 1),
-                          ),
-                          const SizedBox(width: 10),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: AppTheme.success.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Text(
-                              _inr.format(double.tryParse('${k['total_revenue']}') ?? 0),
-                              style: const TextStyle(
-                                  fontSize: 11.5, fontWeight: FontWeight.w800, color: AppTheme.success),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    dueReachedCount > 0 ? Icons.warning_amber_rounded : Icons.notifications_active_rounded,
+                    color: dueReachedCount > 0 ? AppTheme.danger : AppTheme.warning,
+                    size: 26,
                   ),
-                ),
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFF1E0),
-                    borderRadius: BorderRadius.circular(16),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          dueReachedCount > 0
+                              ? '$dueReachedCount Incomplete Order(s) Reached Delivery Date'
+                              : '$dueSoonCount Order(s) Due Within 2 Days',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 13.5,
+                            color: dueReachedCount > 0 ? AppTheme.danger : AppTheme.woodDark,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${dueReachedCount > 0 ? "$dueSoonCount due within 2 days • " : ""}Tap to review incomplete deliveries',
+                          style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                        ),
+                      ],
+                    ),
                   ),
-                  child: const Icon(Icons.trending_up_rounded, color: Color(0xFFEA580C), size: 30),
-                ),
-              ],
+                  TextButton(
+                    onPressed: () => widget.onNavigateTab(1, ordersFilter: dueReachedCount > 0 ? 'due_reached' : 'pending'),
+                    child: const Text('View', style: TextStyle(fontWeight: FontWeight.w800)),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 14),
 
-          // Quick Navigation KPI Cards Grid
+          // KPI Cards Grid (No amount/revenue details shown)
           LayoutBuilder(
             builder: (ctx, constraints) {
               final cols = constraints.maxWidth > 700 ? 4 : 2;
@@ -124,42 +212,42 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
                 physics: const NeverScrollableScrollPhysics(),
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: cols,
-                  mainAxisExtent: 134,
+                  mainAxisExtent: 132,
                   crossAxisSpacing: 12,
                   mainAxisSpacing: 12,
                 ),
                 children: [
                   _pastelTile(
-                    icon: Icons.people_alt_rounded,
-                    iconBg: const Color(0xFFE8F1FD),
-                    iconColor: const Color(0xFF2563EB),
-                    title: 'Customers',
-                    value: '${k['total_customers'] ?? 0}',
-                    onTap: () => widget.onNavigateTab(1),
-                  ),
-                  _pastelTile(
-                    icon: Icons.receipt_long_rounded,
+                    icon: Icons.hourglass_bottom_rounded,
                     iconBg: const Color(0xFFFFF1E0),
                     iconColor: const Color(0xFFEA580C),
-                    title: 'Live Orders',
-                    value: '${k['active_orders'] ?? 0}',
-                    onTap: () => widget.onNavigateTab(2),
+                    title: 'Pending Orders',
+                    value: '$pendingCount',
+                    onTap: () => widget.onNavigateTab(1, ordersFilter: 'pending'),
                   ),
                   _pastelTile(
-                    icon: Icons.settings_suggest_rounded,
-                    iconBg: const Color(0xFFFEF6DC),
-                    iconColor: const Color(0xFFD97706),
-                    title: 'Completed',
-                    value: '${k['completed_orders'] ?? 0}',
-                    onTap: () => widget.onNavigateTab(2),
+                    icon: Icons.warning_amber_rounded,
+                    iconBg: const Color(0xFFFDECEC),
+                    iconColor: AppTheme.danger,
+                    title: 'Delivery Reached',
+                    value: '$dueReachedCount',
+                    onTap: () => widget.onNavigateTab(1, ordersFilter: 'due_reached'),
                   ),
                   _pastelTile(
-                    icon: Icons.bar_chart_rounded,
+                    icon: Icons.verified_rounded,
                     iconBg: const Color(0xFFE7F7EE),
                     iconColor: const Color(0xFF16A34A),
-                    title: 'Reports',
-                    value: 'View',
-                    onTap: () => widget.onNavigateTab(3),
+                    title: 'Completed',
+                    value: '${k['completed_orders'] ?? 0}',
+                    onTap: () => widget.onNavigateTab(1, ordersFilter: 'completed'),
+                  ),
+                  _pastelTile(
+                    icon: Icons.inventory_2_rounded,
+                    iconBg: const Color(0xFFE8F1FD),
+                    iconColor: const Color(0xFF2563EB),
+                    title: 'Total Orders',
+                    value: '${k['total_orders'] ?? 0}',
+                    onTap: () => widget.onNavigateTab(1, ordersFilter: 'all'),
                   ),
                 ],
               );
@@ -167,72 +255,59 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
           ),
           const SizedBox(height: 18),
 
-          // Recent Orders Section
+          // Section 1: Delivery Date Reached (Not Completed)
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Recent Orders',
-                  style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800, color: AppTheme.woodDark)),
+              Expanded(
+                child: UiKit.sectionHeader(
+                  Icons.warning_amber_rounded,
+                  'Delivery Date Reached (Not Completed) (${_dueReachedOrders.length})',
+                ),
+              ),
               TextButton(
-                onPressed: () => widget.onNavigateTab(1),
+                onPressed: () => widget.onNavigateTab(1, ordersFilter: 'due_reached'),
+                child: const Text('All ->', style: TextStyle(fontWeight: FontWeight.w700)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (_dueReachedOrders.isEmpty)
+            UiKit.cardContainer(
+              child: const Row(
+                children: [
+                  Icon(Icons.check_circle_rounded, color: AppTheme.success),
+                  SizedBox(width: 10),
+                  Expanded(child: Text('No overdue or due-today incomplete orders right now.')),
+                ],
+              ),
+            )
+          else
+            ..._dueReachedOrders.take(6).map((o) => _orderPreviewCard(o, highlightDueReached: true)),
+
+          const SizedBox(height: 14),
+
+          // Section 2: Pending Orders
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: UiKit.sectionHeader(
+                  Icons.hourglass_bottom_rounded,
+                  'Pending Orders (${_pendingOrders.length})',
+                ),
+              ),
+              TextButton(
+                onPressed: () => widget.onNavigateTab(1, ordersFilter: 'pending'),
                 child: const Text('View All ->', style: TextStyle(fontWeight: FontWeight.w700)),
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          if (_recentOrders.isEmpty)
-            UiKit.cardContainer(child: const Center(child: Text('No orders yet.')))
+          const SizedBox(height: 8),
+          if (_pendingOrders.isEmpty)
+            UiKit.cardContainer(child: const Center(child: Text('All orders are completed!')))
           else
-            ..._recentOrders.map((raw) {
-              final o = Map<String, dynamic>.from(raw as Map);
-              final stage = int.tryParse('${o['current_stage']}') ?? 1;
-              final statusColor = stage == 8 ? AppTheme.success : (stage >= 4 ? AppTheme.warning : AppTheme.info);
-              return InkWell(
-                borderRadius: BorderRadius.circular(18),
-                onTap: () => widget.onNavigateTab(2),
-                child: UiKit.cardContainer(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: Container(
-                          width: 48,
-                          height: 66,
-                          padding: const EdgeInsets.all(2),
-                          color: Colors.white,
-                          child: (o['ai_output_image_url'] ?? '').toString().isNotEmpty
-                              ? Image.network(
-                                  ApiService.instance.mediaUrl(o['ai_output_image_url'].toString()),
-                                  fit: BoxFit.contain,
-                                  errorBuilder: (_, __, ___) =>
-                                      const Icon(Icons.door_front_door_rounded, color: AppTheme.woodPrimary),
-                                )
-                              : const Icon(Icons.door_front_door_rounded, color: AppTheme.woodPrimary),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('#${o['job_id']}',
-                                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, color: AppTheme.woodDark)),
-                            const SizedBox(height: 3),
-                            Text('${o['customer_name']} • ${o['wood_species']}',
-                                style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
-                            const SizedBox(height: 5),
-                            UiKit.iconChip(UiKit.stageIcon(stage), '${o['current_stage_name']}', color: statusColor),
-                          ],
-                        ),
-                      ),
-                      Text('${o['expected_delivery_date']}',
-                          style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: AppTheme.textMuted)),
-                    ],
-                  ),
-                ),
-              );
-            }),
+            ..._pendingOrders.take(8).map((o) => _orderPreviewCard(o, highlightDueReached: o['is_delivery_reached'] == true)),
         ],
       ),
     );
@@ -277,7 +352,7 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
             Text(value,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w900, color: AppTheme.woodDark)),
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: AppTheme.woodDark)),
           ],
         ),
       ),

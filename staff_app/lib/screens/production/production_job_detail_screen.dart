@@ -376,6 +376,16 @@ class _ProductionJobDetailScreenState extends State<ProductionJobDetailScreen> {
                   UiKit.specTile(Icons.auto_awesome_rounded, 'Carving Pattern', '${job['carving_pattern'] ?? '-'}'),
                   const SizedBox(height: 8),
                   UiKit.specTile(Icons.vpn_key_rounded, 'Hardware Cutouts', '${job['hardware'] ?? '-'}'),
+                  if ((job['production_place'] ?? '').toString().trim().isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    UiKit.specTile(Icons.location_city_rounded, 'Production Place', '${job['production_place']}',
+                        iconColor: AppTheme.info),
+                  ],
+                  if ((job['assigned_production_user_name'] ?? '').toString().trim().isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    UiKit.specTile(Icons.engineering_rounded, 'Assigned To', '${job['assigned_production_user_name']}',
+                        iconColor: AppTheme.woodPrimary),
+                  ],
                   if ((job['workshop_notes'] ?? '').toString().isNotEmpty) ...[
                     const SizedBox(height: 10),
                     UiKit.specTile(Icons.sticky_note_2_rounded, 'Workshop Notes', '${job['workshop_notes']}',

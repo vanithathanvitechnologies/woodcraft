@@ -14,7 +14,7 @@ function handleCustomerPortalRoutes(string $method, array $segments): void {
         $oStmt = $pdo->prepare(
             'SELECT id, job_id, woodwork_category, width_inches, height_inches, frame_section, door_thickness,
                     leaf_type, wood_species, carving_pattern, polish_shade, hardware, quantity, custom_notes,
-                    ai_output_image_url, total_cost, advance_amount, balance_amount,
+                    ai_output_image_url, production_place,
                     expected_delivery_date, priority, current_stage, current_stage_name, created_at, updated_at
              FROM orders
              WHERE customer_id = ?
@@ -25,8 +25,6 @@ function handleCustomerPortalRoutes(string $method, array $segments): void {
 
         $inProgress = 0;
         $completed = 0;
-        $totalAmount = 0;
-        $totalBalance = 0;
 
         foreach ($orders as &$o) {
             $hStmt = $pdo->prepare('SELECT stage_number, stage_name, notes, created_at FROM order_stage_history WHERE order_id = ? AND is_blocker = 0 ORDER BY created_at ASC');
@@ -38,8 +36,6 @@ function handleCustomerPortalRoutes(string $method, array $segments): void {
             $o['progress_photos'] = $pStmt->fetchAll();
 
             if ((int)$o['current_stage'] === 8) $completed++; else $inProgress++;
-            $totalAmount += (float)$o['total_cost'];
-            $totalBalance += (float)$o['balance_amount'];
         }
 
         jsonResponse([
@@ -49,8 +45,6 @@ function handleCustomerPortalRoutes(string $method, array $segments): void {
                 'total_orders' => count($orders),
                 'in_progress' => $inProgress,
                 'completed' => $completed,
-                'total_amount' => $totalAmount,
-                'total_balance' => $totalBalance,
             ],
             'stages' => PRODUCTION_STAGES,
             'orders' => $orders,
@@ -63,7 +57,7 @@ function handleCustomerPortalRoutes(string $method, array $segments): void {
         $oStmt = $pdo->prepare(
             'SELECT id, job_id, woodwork_category, width_inches, height_inches, frame_section, door_thickness,
                     leaf_type, wood_species, carving_pattern, polish_shade, hardware, quantity, custom_notes,
-                    ai_output_image_url, total_cost, advance_amount, balance_amount,
+                    ai_output_image_url, production_place,
                     expected_delivery_date, priority, current_stage, current_stage_name, created_at, updated_at
              FROM orders
              WHERE id = ? AND customer_id = ? LIMIT 1'

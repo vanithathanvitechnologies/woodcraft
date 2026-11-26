@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../core/app_theme.dart';
 import '../../services/api_service.dart';
+import '../../services/notifications_service.dart';
 import '../../widgets/ui_kit.dart';
 import '../login_screen.dart';
+import '../shared/notifications_screen.dart';
 import 'production_job_detail_screen.dart';
 
 class ProductionHomeScreen extends StatefulWidget {
@@ -17,6 +20,9 @@ class _ProductionHomeScreenState extends State<ProductionHomeScreen> with Single
   List<dynamic> _jobs = [];
   bool _loading = true;
   String _filter = 'new';
+  int _unreadCount = 0;
+  int _urgentWatchCount = 0;
+  Timer? _notifTimer;
 
   @override
   void initState() {
@@ -29,6 +35,26 @@ class _ProductionHomeScreenState extends State<ProductionHomeScreen> with Single
       _loadJobs();
     });
     _loadJobs();
+    _refreshNotifications();
+    _notifTimer = Timer.periodic(const Duration(seconds: 45), (_) => _refreshNotifications());
+  }
+
+  @override
+  void dispose() {
+    _notifTimer?.cancel();
+    _tabCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _refreshNotifications() async {
+    try {
+      final feed = await NotificationsService.instance.fetchNotifications();
+      if (!mounted) return;
+      setState(() {
+        _unreadCount = feed.unreadCount;
+        _urgentWatchCount = feed.dueReachedCount + feed.dueSoonCount;
+      });
+    } catch (_) {}
   }
 
   Future<void> _loadJobs() async {
@@ -41,6 +67,15 @@ class _ProductionHomeScreenState extends State<ProductionHomeScreen> with Single
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _openNotifications() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+    );
+    _refreshNotifications();
+    _loadJobs();
   }
 
   void _openJobIdLookup() {
@@ -70,6 +105,7 @@ class _ProductionHomeScreenState extends State<ProductionHomeScreen> with Single
                   MaterialPageRoute(builder: (_) => ProductionJobDetailScreen(jobId: job['id'] as int)),
                 );
                 _loadJobs();
+                _refreshNotifications();
               } catch (e) {
                 if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
               }
@@ -123,6 +159,7 @@ class _ProductionHomeScreenState extends State<ProductionHomeScreen> with Single
           ],
         ),
         actions: [
+          UiKit.notificationBellButton(unreadCount: _unreadCount, onPressed: _openNotifications),
           IconButton(tooltip: 'QR / Job ID Lookup', onPressed: _openJobIdLookup, icon: const Icon(Icons.qr_code_scanner_rounded)),
           IconButton(tooltip: 'Logout', onPressed: _logout, icon: const Icon(Icons.logout_rounded)),
         ],
@@ -138,125 +175,183 @@ class _ProductionHomeScreenState extends State<ProductionHomeScreen> with Single
           ],
         ),
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _jobs.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
+      body: Column(
+        children: [
+          if (_unreadCount > 0 || _urgentWatchCount > 0)
+            Material(
+              color: const Color(0xFFFFF4E5),
+              child: InkWell(
+                onTap: _openNotifications,
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                  decoration: BoxDecoration(
+                    border: Border(bottom: BorderSide(color: AppTheme.warning.withValues(alpha: 0.4))),
+                  ),
+                  child: Row(
                     children: [
-                      const Icon(Icons.inventory_2_outlined, size: 48, color: Colors.black26),
-                      const SizedBox(height: 8),
-                      const Text('No jobs in this queue.'),
-                      const SizedBox(height: 10),
-                      OutlinedButton.icon(
-                        onPressed: _loadJobs,
-                        icon: const Icon(Icons.refresh_rounded),
-                        label: const Text('Refresh'),
+                      const Icon(Icons.notifications_active_rounded, color: AppTheme.danger, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _unreadCount > 0
+                              ? '$_unreadCount unread alert(s) • Check 2-day delivery reminders & assigned jobs'
+                              : '$_urgentWatchCount incomplete job(s) due within 2 days / reached',
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.woodDark),
+                        ),
                       ),
+                      const Text('View ->',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppTheme.danger)),
                     ],
                   ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _loadJobs,
-                  child: ListView.builder(
-                    padding: const EdgeInsets.all(14),
-                    itemCount: _jobs.length,
-                    itemBuilder: (_, i) {
-                      final j = Map<String, dynamic>.from(_jobs[i] as Map);
-                      final stage = int.tryParse('${j['current_stage']}') ?? 1;
-                      final pColor = UiKit.priorityColor(j['priority']?.toString());
-                      return InkWell(
-                        borderRadius: BorderRadius.circular(18),
-                        onTap: () async {
-                          await Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => ProductionJobDetailScreen(jobId: j['id'] as int)),
-                          );
-                          _loadJobs();
+                ),
+              ),
+            ),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _jobs.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.inventory_2_outlined, size: 48, color: Colors.black26),
+                            const SizedBox(height: 8),
+                            const Text('No jobs in this queue.'),
+                            const SizedBox(height: 10),
+                            OutlinedButton.icon(
+                              onPressed: () {
+                                _loadJobs();
+                                _refreshNotifications();
+                              },
+                              icon: const Icon(Icons.refresh_rounded),
+                              label: const Text('Refresh'),
+                            ),
+                          ],
+                        ),
+                      )
+                    : RefreshIndicator(
+                        onRefresh: () async {
+                          await _loadJobs();
+                          await _refreshNotifications();
                         },
-                        child: UiKit.cardContainer(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: Container(
-                                      width: 62,
-                                      height: 88,
-                                      padding: const EdgeInsets.all(3),
-                                      color: Colors.white,
-                                      child: (j['ai_output_image_url'] ?? '').toString().isNotEmpty
-                                          ? Image.network(
-                                              ApiService.instance.mediaUrl(j['ai_output_image_url'].toString()),
-                                              fit: BoxFit.contain,
-                                              errorBuilder: (_, __, ___) =>
-                                                  const Icon(Icons.door_front_door_rounded, size: 32, color: AppTheme.woodPrimary),
-                                            )
-                                          : const Icon(Icons.door_front_door_rounded, size: 32, color: AppTheme.woodPrimary),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
+                        child: ListView.builder(
+                          padding: const EdgeInsets.all(14),
+                          itemCount: _jobs.length,
+                          itemBuilder: (_, i) {
+                            final j = Map<String, dynamic>.from(_jobs[i] as Map);
+                            final stage = int.tryParse('${j['current_stage']}') ?? 1;
+                            final pColor = UiKit.priorityColor(j['priority']?.toString());
+                            final prodPlace = (j['production_place'] ?? '').toString().trim();
+                            final isReached = j['is_delivery_reached'] == true;
+                            final isDueSoon = j['is_due_soon'] == true;
+                            final daysLeft = int.tryParse('${j['days_left']}') ?? 0;
+
+                            return InkWell(
+                              borderRadius: BorderRadius.circular(18),
+                              onTap: () async {
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(builder: (_) => ProductionJobDetailScreen(jobId: j['id'] as int)),
+                                );
+                                _loadJobs();
+                                _refreshNotifications();
+                              },
+                              child: UiKit.cardContainer(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        Row(
-                                          children: [
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-                                              decoration: BoxDecoration(
-                                                color: AppTheme.woodDark,
-                                                borderRadius: BorderRadius.circular(7),
-                                              ),
-                                              child: Text('${j['job_id']}',
-                                                  style: const TextStyle(
-                                                      color: AppTheme.brass, fontWeight: FontWeight.w800, fontSize: 11.5)),
-                                            ),
-                                            const SizedBox(width: 6),
-                                            UiKit.iconChip(Icons.flag_rounded, '${j['priority']}', color: pColor),
-                                            const Spacer(),
-                                            const Icon(Icons.arrow_forward_ios_rounded, size: 15, color: Colors.black38),
-                                          ],
+                                        ClipRRect(
+                                          borderRadius: BorderRadius.circular(12),
+                                          child: Container(
+                                            width: 62,
+                                            height: 88,
+                                            padding: const EdgeInsets.all(3),
+                                            color: Colors.white,
+                                            child: (j['ai_output_image_url'] ?? '').toString().isNotEmpty
+                                                ? Image.network(
+                                                    ApiService.instance.mediaUrl(j['ai_output_image_url'].toString()),
+                                                    fit: BoxFit.contain,
+                                                    errorBuilder: (_, __, ___) =>
+                                                        const Icon(Icons.door_front_door_rounded, size: 32, color: AppTheme.woodPrimary),
+                                                  )
+                                                : const Icon(Icons.door_front_door_rounded, size: 32, color: AppTheme.woodPrimary),
+                                          ),
                                         ),
-                                        const SizedBox(height: 6),
-                                        Text('${j['woodwork_category']}',
-                                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.textDark)),
-                                        const SizedBox(height: 6),
-                                        Wrap(
-                                          spacing: 6,
-                                          runSpacing: 6,
-                                          children: [
-                                            UiKit.iconChip(Icons.forest_rounded, '${j['wood_species']}'),
-                                            UiKit.iconChip(Icons.straighten_rounded, '${j['width_inches']}"×${j['height_inches']}"'),
-                                            UiKit.iconChip(Icons.inventory_2_rounded, 'Qty ${j['quantity']}', color: AppTheme.info),
-                                          ],
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Row(
+                                                children: [
+                                                  Container(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                                                    decoration: BoxDecoration(
+                                                      color: AppTheme.woodDark,
+                                                      borderRadius: BorderRadius.circular(7),
+                                                    ),
+                                                    child: Text('${j['job_id']}',
+                                                        style: const TextStyle(
+                                                            color: AppTheme.brass, fontWeight: FontWeight.w800, fontSize: 11.5)),
+                                                  ),
+                                                  const SizedBox(width: 6),
+                                                  UiKit.iconChip(Icons.flag_rounded, '${j['priority']}', color: pColor),
+                                                  const Spacer(),
+                                                  const Icon(Icons.arrow_forward_ios_rounded, size: 15, color: Colors.black38),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 6),
+                                              Text('${j['woodwork_category']}',
+                                                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.textDark)),
+                                              const SizedBox(height: 6),
+                                              Wrap(
+                                                spacing: 6,
+                                                runSpacing: 6,
+                                                children: [
+                                                  UiKit.iconChip(Icons.forest_rounded, '${j['wood_species']}'),
+                                                  UiKit.iconChip(Icons.straighten_rounded, '${j['width_inches']}"×${j['height_inches']}"'),
+                                                  UiKit.iconChip(Icons.inventory_2_rounded, 'Qty ${j['quantity']}', color: AppTheme.info),
+                                                  if (prodPlace.isNotEmpty)
+                                                    UiKit.iconChip(Icons.location_city_rounded, prodPlace, color: AppTheme.woodPrimary),
+                                                  if (isReached)
+                                                    UiKit.iconChip(
+                                                      Icons.warning_amber_rounded,
+                                                      daysLeft == 0 ? 'Due Today' : 'Overdue ${daysLeft.abs()}d',
+                                                      color: AppTheme.danger,
+                                                    )
+                                                  else if (isDueSoon)
+                                                    UiKit.iconChip(Icons.schedule_rounded, 'Due in ${daysLeft}d', color: AppTheme.warning),
+                                                ],
+                                              ),
+                                            ],
+                                          ),
                                         ),
                                       ],
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(height: 12),
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        UiKit.iconChip(UiKit.stageIcon(stage), 'Stage $stage/8 • ${j['current_stage_name']}',
+                                            color: stage == 8 ? AppTheme.success : AppTheme.woodPrimary),
+                                        UiKit.iconChip(Icons.event_available_rounded, '${j['expected_delivery_date']}',
+                                            color: AppTheme.danger),
+                                      ],
+                                    ),
+                                  ],
+                                ),
                               ),
-                              const SizedBox(height: 12),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  UiKit.iconChip(UiKit.stageIcon(stage), 'Stage $stage/8 • ${j['current_stage_name']}',
-                                      color: stage == 8 ? AppTheme.success : AppTheme.woodPrimary),
-                                  UiKit.iconChip(Icons.event_available_rounded, '${j['expected_delivery_date']}',
-                                      color: AppTheme.danger),
-                                ],
-                              ),
-                            ],
-                          ),
+                            );
+                          },
                         ),
-                      );
-                    },
-                  ),
-                ),
+                      ),
+          ),
+        ],
+      ),
     );
   }
 }

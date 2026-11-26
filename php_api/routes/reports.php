@@ -9,12 +9,12 @@ function handleReportsRoutes(string $method, array $segments): void {
         $kpis = $pdo->query('
             SELECT
               COUNT(*) AS total_orders,
-              COALESCE(SUM(total_cost), 0) AS total_revenue,
-              COALESCE(SUM(advance_amount), 0) AS total_advance,
-              COALESCE(SUM(balance_amount), 0) AS total_balance,
               SUM(CASE WHEN current_stage = 8 THEN 1 ELSE 0 END) AS completed_orders,
               SUM(CASE WHEN current_stage < 8 THEN 1 ELSE 0 END) AS active_orders,
-              SUM(CASE WHEN current_stage < 8 AND expected_delivery_date < CURDATE() THEN 1 ELSE 0 END) AS delayed_orders,
+              SUM(CASE WHEN current_stage < 8 THEN 1 ELSE 0 END) AS pending_orders,
+              SUM(CASE WHEN current_stage < 8 AND expected_delivery_date <= CURDATE() THEN 1 ELSE 0 END) AS delayed_orders,
+              SUM(CASE WHEN current_stage < 8 AND expected_delivery_date <= CURDATE() THEN 1 ELSE 0 END) AS delivery_reached_incomplete_orders,
+              SUM(CASE WHEN current_stage < 8 AND expected_delivery_date > CURDATE() AND DATEDIFF(expected_delivery_date, CURDATE()) <= 2 THEN 1 ELSE 0 END) AS due_soon_orders,
               SUM(CASE WHEN has_blocker = 1 THEN 1 ELSE 0 END) AS blocked_orders
             FROM orders
         ')->fetch();
@@ -34,14 +34,18 @@ function handleReportsRoutes(string $method, array $segments): void {
         ')->fetchAll();
 
         $byWood = $pdo->query('
-            SELECT wood_species, COUNT(*) AS order_count, COALESCE(SUM(total_cost), 0) AS revenue
+            SELECT wood_species, COUNT(*) AS order_count,
+                   SUM(CASE WHEN current_stage < 8 THEN 1 ELSE 0 END) AS pending_count,
+                   SUM(CASE WHEN current_stage = 8 THEN 1 ELSE 0 END) AS completed_count
             FROM orders
             GROUP BY wood_species
-            ORDER BY revenue DESC
+            ORDER BY order_count DESC
         ')->fetchAll();
 
         $byCategory = $pdo->query('
-            SELECT woodwork_category, COUNT(*) AS order_count, COALESCE(SUM(total_cost), 0) AS revenue
+            SELECT woodwork_category, COUNT(*) AS order_count,
+                   SUM(CASE WHEN current_stage < 8 THEN 1 ELSE 0 END) AS pending_count,
+                   SUM(CASE WHEN current_stage = 8 THEN 1 ELSE 0 END) AS completed_count
             FROM orders
             GROUP BY woodwork_category
             ORDER BY order_count DESC
@@ -50,11 +54,12 @@ function handleReportsRoutes(string $method, array $segments): void {
         $bySales = $pdo->query('
             SELECT COALESCE(u.name, "Unassigned") AS sales_name,
                    COUNT(o.id) AS order_count,
-                   COALESCE(SUM(o.total_cost), 0) AS revenue
+                   SUM(CASE WHEN o.current_stage < 8 THEN 1 ELSE 0 END) AS pending_count,
+                   SUM(CASE WHEN o.current_stage = 8 THEN 1 ELSE 0 END) AS completed_count
             FROM orders o
             LEFT JOIN users u ON u.id = o.sales_user_id
             GROUP BY o.sales_user_id, u.name
-            ORDER BY revenue DESC
+            ORDER BY order_count DESC
         ')->fetchAll();
 
         jsonResponse([
@@ -73,10 +78,12 @@ function handleReportsRoutes(string $method, array $segments): void {
             SELECT o.job_id, o.created_at, c.name AS customer_name, c.mobile AS customer_mobile,
                    o.woodwork_category, o.wood_species, o.leaf_type,
                    CONCAT(o.width_inches, "x", o.height_inches) AS dimensions_in,
-                   o.quantity, o.total_cost, o.advance_amount, o.balance_amount,
+                   o.quantity, COALESCE(pu.name, "Unassigned") AS production_member,
+                   COALESCE(o.production_place, "") AS production_place,
                    o.expected_delivery_date, o.current_stage_name, o.priority
             FROM orders o
             JOIN customers c ON c.id = o.customer_id
+            LEFT JOIN users pu ON pu.id = o.assigned_production_user_id
             ORDER BY o.created_at DESC
         ')->fetchAll();
 
@@ -85,7 +92,7 @@ function handleReportsRoutes(string $method, array $segments): void {
         $out = fopen('php://output', 'w');
         fputcsv($out, [
             'Job ID', 'Order Date', 'Customer Name', 'Mobile', 'Category', 'Wood Species',
-            'Leaf Type', 'Dimensions (in)', 'Qty', 'Total Cost', 'Advance', 'Balance',
+            'Leaf Type', 'Dimensions (in)', 'Qty', 'Production Member', 'Production Place',
             'Delivery Date', 'Production Stage', 'Priority',
         ]);
         foreach ($rows as $r) {

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { apiRequest, formatINR, mediaUrl } from '../api';
+import { useSearchParams } from 'react-router-dom';
+import { apiRequest, mediaUrl } from '../api';
 
 const STAGES = [
   'Pending / New Job',
@@ -13,14 +14,30 @@ const STAGES = [
 ];
 
 export default function OrdersPage() {
+  const [searchParams] = useSearchParams();
   const [orders, setOrders] = useState([]);
-  const [search, setSearch] = useState('');
+  const [prodTeam, setProdTeam] = useState([]);
+  const [search, setSearch] = useState(() => searchParams.get('search') || '');
   const [stage, setStage] = useState('all');
+  const [statusView, setStatusView] = useState('all'); // all | pending | due_reached
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [assignUserId, setAssignUserId] = useState('');
+  const [assignPlace, setAssignPlace] = useState('');
+  const [assignSaving, setAssignSaving] = useState(false);
+  const [assignMsg, setAssignMsg] = useState('');
   const [lightboxImage, setLightboxImage] = useState(null);
+
+  async function loadProductionTeam() {
+    try {
+      const data = await apiRequest('/production/team');
+      setProdTeam(data.members || []);
+    } catch {
+      // Ignore if unavailable
+    }
+  }
 
   async function loadOrders() {
     setLoading(true);
@@ -29,6 +46,8 @@ export default function OrdersPage() {
       const qs = new URLSearchParams();
       if (search.trim()) qs.set('search', search.trim());
       if (stage !== 'all') qs.set('stage', stage);
+      if (statusView === 'pending') qs.set('pending_only', 'true');
+      if (statusView === 'due_reached') qs.set('due_reached_only', 'true');
       const data = await apiRequest(`/orders?${qs.toString()}`);
       setOrders(data.orders || []);
     } catch (err) {
@@ -39,18 +58,49 @@ export default function OrdersPage() {
   }
 
   useEffect(() => {
+    loadProductionTeam();
+  }, []);
+
+  useEffect(() => {
     loadOrders();
-  }, [stage]);
+  }, [stage, statusView]);
 
   async function openOrderDetail(id) {
     setDetailLoading(true);
+    setAssignMsg('');
     try {
       const data = await apiRequest(`/orders/${id}`);
-      setSelectedOrder(data.order);
+      const ord = data.order;
+      setSelectedOrder(ord);
+      setAssignUserId(ord?.assigned_production_user_id ? String(ord.assigned_production_user_id) : '');
+      setAssignPlace(ord?.production_place || '');
     } catch (err) {
       setError(err.message);
     } finally {
       setDetailLoading(false);
+    }
+  }
+
+  async function saveProductionAssignment(e) {
+    e.preventDefault();
+    if (!selectedOrder) return;
+    setAssignSaving(true);
+    setAssignMsg('');
+    try {
+      await apiRequest(`/production/jobs/${selectedOrder.id}/assign`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          assigned_production_user_id: assignUserId ? Number(assignUserId) : null,
+          production_place: assignPlace.trim(),
+        }),
+      });
+      setAssignMsg('Production team assignment & place saved.');
+      await openOrderDetail(selectedOrder.id);
+      await loadOrders();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setAssignSaving(false);
     }
   }
 
@@ -59,7 +109,7 @@ export default function OrdersPage() {
       <div className="page-header">
         <div>
           <h2>Orders & Live Production List</h2>
-          <p>All confirmed custom door & woodwork orders with live workshop status, billing, and delivery tracking</p>
+          <p>All custom door & woodwork orders with workshop assignment, pending & delivery tracking</p>
         </div>
         <button className="btn btn-outline" onClick={loadOrders}>Refresh Orders</button>
       </div>
@@ -70,12 +120,17 @@ export default function OrdersPage() {
         <div className="toolbar">
           <input
             className="input"
-            style={{ minWidth: 260 }}
-            placeholder="Search Job ID, customer, mobile, wood..."
+            style={{ minWidth: 240 }}
+            placeholder="Search Job ID, customer, place, member..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && loadOrders()}
           />
+          <select className="select" value={statusView} onChange={(e) => setStatusView(e.target.value)}>
+            <option value="all">All Orders</option>
+            <option value="pending">Pending Orders (Incomplete)</option>
+            <option value="due_reached">Delivery Date Reached (Incomplete)</option>
+          </select>
           <select className="select" value={stage} onChange={(e) => setStage(e.target.value)}>
             <option value="all">All Production Stages</option>
             {STAGES.map((s, idx) => (
@@ -93,7 +148,7 @@ export default function OrdersPage() {
                 <th>Job ID</th>
                 <th>Customer</th>
                 <th>Woodwork Specs</th>
-                <th>Billing (Total / Bal)</th>
+                <th>Production / Place</th>
                 <th>Delivery Date</th>
                 <th>Live Stage</th>
                 <th>Action</th>
@@ -105,64 +160,68 @@ export default function OrdersPage() {
               ) : orders.length === 0 ? (
                 <tr><td colSpan={8}>No orders found.</td></tr>
               ) : (
-                orders.map((o) => (
-                  <tr key={o.id}>
-                    <td>
-                      {o.ai_output_image_url ? (
-                        <img
-                          className="thumb"
-                          src={mediaUrl(o.ai_output_image_url)}
-                          alt={o.job_id}
-                          style={{ cursor: 'zoom-in' }}
-                          title="Click to view full size"
-                          onClick={() =>
-                            setLightboxImage({
-                              url: mediaUrl(o.ai_output_image_url),
-                              title: `${o.job_id} • ${o.woodwork_category}`,
-                            })
-                          }
-                        />
-                      ) : (
-                        <div className="thumb" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10 }}>N/A</div>
-                      )}
-                    </td>
-                    <td>
-                      <div style={{ fontWeight: 700, color: '#3b210e' }}>{o.job_id}</div>
-                      <div style={{ fontSize: 11, color: '#6f6256' }}>{o.priority} Priority</div>
-                    </td>
-                    <td>
-                      <div style={{ fontWeight: 600 }}>{o.customer_name}</div>
-                      <div style={{ fontSize: 12, color: '#6f6256' }}>{o.customer_mobile}</div>
-                    </td>
-                    <td>
-                      <div style={{ fontWeight: 600 }}>{o.woodwork_category}</div>
-                      <div style={{ fontSize: 12, color: '#6f6256' }}>
-                        {o.wood_species} • {o.width_inches}&quot;×{o.height_inches}&quot; • {o.leaf_type}
-                      </div>
-                    </td>
-                    <td>
-                      <div style={{ fontWeight: 700 }}>{formatINR(o.total_cost)}</div>
-                      <div style={{ fontSize: 12, color: Number(o.balance_amount) > 0 ? '#b83227' : '#1f7a4c' }}>
-                        Bal: {formatINR(o.balance_amount)}
-                      </div>
-                    </td>
-                    <td>
-                      <div style={{ fontWeight: 600 }}>{o.expected_delivery_date}</div>
-                      {o.is_delayed && <span className="badge badge-danger">Delayed</span>}
-                      {Boolean(o.has_blocker) && <span className="badge badge-warning" style={{ marginLeft: 4 }}>Blocker</span>}
-                    </td>
-                    <td>
-                      <span className="badge badge-stage">
-                        {o.current_stage}/8 {o.current_stage_name}
-                      </span>
-                    </td>
-                    <td>
-                      <button className="btn btn-outline btn-sm" onClick={() => openOrderDetail(o.id)}>
-                        Inspect
-                      </button>
-                    </td>
-                  </tr>
-                ))
+                orders.map((o) => {
+                  const isReached = Boolean(o.is_delivery_reached || o.is_delayed);
+                  return (
+                    <tr key={o.id}>
+                      <td>
+                        {o.ai_output_image_url ? (
+                          <img
+                            className="thumb"
+                            src={mediaUrl(o.ai_output_image_url)}
+                            alt={o.job_id}
+                            style={{ cursor: 'zoom-in' }}
+                            title="Click to view full size"
+                            onClick={() =>
+                              setLightboxImage({
+                                url: mediaUrl(o.ai_output_image_url),
+                                title: `${o.job_id} • ${o.woodwork_category}`,
+                              })
+                            }
+                          />
+                        ) : (
+                          <div className="thumb" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10 }}>N/A</div>
+                        )}
+                      </td>
+                      <td>
+                        <div style={{ fontWeight: 700, color: '#3b210e' }}>{o.job_id}</div>
+                        <div style={{ fontSize: 11, color: '#6f6256' }}>{o.priority} Priority</div>
+                      </td>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{o.customer_name}</div>
+                        <div style={{ fontSize: 12, color: '#6f6256' }}>{o.customer_mobile}</div>
+                      </td>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{o.woodwork_category}</div>
+                        <div style={{ fontSize: 12, color: '#6f6256' }}>
+                          {o.wood_species} • {o.width_inches}&quot;×{o.height_inches}&quot; • {o.leaf_type}
+                        </div>
+                      </td>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{o.assigned_production_user_name || 'Unassigned'}</div>
+                        <div style={{ fontSize: 12, color: '#6f6256' }}>
+                          {o.production_place ? `Place: ${o.production_place}` : '—'}
+                        </div>
+                      </td>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{o.expected_delivery_date}</div>
+                        {isReached && <span className="badge badge-danger">Delivery Reached</span>}
+                        {!isReached && o.is_due_soon && <span className="badge badge-warning">Due Soon</span>}
+                        {Boolean(o.has_blocker) && <span className="badge badge-warning" style={{ marginLeft: 4 }}>Blocker</span>}
+                      </td>
+                      <td>
+                        <span className="badge badge-stage">
+                          {o.current_stage}/8 {o.current_stage_name}
+                        </span>
+                      </td>
+                      <td>
+                        <button className="btn btn-outline btn-sm" onClick={() => openOrderDetail(o.id)}>
+                          Inspect
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -212,10 +271,48 @@ export default function OrdersPage() {
                     <div><strong>Frame / Thick:</strong> {selectedOrder.frame_section} / {selectedOrder.door_thickness}</div>
                     <div><strong>Leaf / Qty:</strong> {selectedOrder.leaf_type} (Qty {selectedOrder.quantity})</div>
                     <div><strong>Polish:</strong> {selectedOrder.polish_shade}</div>
-                    <div><strong>Total:</strong> {formatINR(selectedOrder.total_cost)}</div>
-                    <div><strong>Advance / Bal:</strong> {formatINR(selectedOrder.advance_amount)} / {formatINR(selectedOrder.balance_amount)}</div>
+                    <div><strong>Delivery Date:</strong> {selectedOrder.expected_delivery_date}</div>
+                    <div><strong>Stage:</strong> {selectedOrder.current_stage}/8 {selectedOrder.current_stage_name}</div>
                   </div>
                 </div>
+
+                {/* Production Assignment & Place */}
+                <form
+                  onSubmit={saveProductionAssignment}
+                  style={{
+                    padding: 14,
+                    borderRadius: 10,
+                    background: '#faf6f0',
+                    border: '1px solid #e6dfd5',
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr auto',
+                    gap: 10,
+                    alignItems: 'end',
+                  }}
+                >
+                  <div className="form-field">
+                    <label>Production Team Member</label>
+                    <select className="select" value={assignUserId} onChange={(e) => setAssignUserId(e.target.value)}>
+                      <option value="">-- Select Production Member --</option>
+                      {prodTeam.map((m) => (
+                        <option key={m.id} value={m.id}>{m.name}{m.phone ? ` (${m.phone})` : ''}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-field">
+                    <label>Production Place (Optional)</label>
+                    <input
+                      className="input"
+                      placeholder="e.g. Workshop Bay 2 / Timber Unit"
+                      value={assignPlace}
+                      onChange={(e) => setAssignPlace(e.target.value)}
+                    />
+                  </div>
+                  <button type="submit" className="btn btn-primary" disabled={assignSaving}>
+                    {assignSaving ? 'Saving...' : 'Save Assignment'}
+                  </button>
+                </form>
+                {assignMsg && <div className="alert-success">{assignMsg}</div>}
 
                 {Boolean(selectedOrder.has_blocker) && (
                   <div className="alert-error">

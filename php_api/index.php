@@ -33,6 +33,7 @@ require_once __DIR__ . '/routes/catalog.php';
 require_once __DIR__ . '/routes/customers.php';
 require_once __DIR__ . '/routes/orders.php';
 require_once __DIR__ . '/routes/production.php';
+require_once __DIR__ . '/routes/notifications.php';
 require_once __DIR__ . '/routes/customer_portal.php';
 require_once __DIR__ . '/routes/reports.php';
 
@@ -102,6 +103,9 @@ try {
             break;
         case 'customer':
             handleCustomerPortalRoutes($method, $rest);
+            break;
+        case 'notifications':
+            handleNotificationsRoutes($method, $rest);
             break;
         case 'reports':
             handleReportsRoutes($method, $rest);

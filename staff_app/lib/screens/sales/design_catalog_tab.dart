@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import '../../core/app_theme.dart';
 import '../../core/constants.dart';
 import '../../services/api_service.dart';
@@ -14,7 +13,6 @@ class DesignCatalogTab extends StatefulWidget {
 
 class _DesignCatalogTabState extends State<DesignCatalogTab> {
   final _searchCtrl = TextEditingController();
-  final _inr = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
   String _selectedCategory = 'All';
   List<String> _categories = List<String>.from(AppConstants.woodworkCategories);
   List<dynamic> _designs = [];
@@ -190,7 +188,7 @@ class _DesignCatalogTabState extends State<DesignCatalogTab> {
                             final d = Map<String, dynamic>.from(visible[i] as Map);
                             final isTrending = d['is_trending'] == 1;
                             final imgUrl = ApiService.instance.mediaUrl(d['image_url']?.toString());
-                            final priceText = _inr.format(double.tryParse('${d['base_price']}') ?? 0);
+                            final carving = (d['carving_style'] ?? '').toString().trim();
                             return Card(
                               clipBehavior: Clip.antiAlias,
                               child: Column(
@@ -205,7 +203,6 @@ class _DesignCatalogTabState extends State<DesignCatalogTab> {
                                           imageUrl: imgUrl,
                                           title: '${d['title'] ?? ''}',
                                           subtitle: '${d['wood_species'] ?? ''} • ${d['category'] ?? ''}',
-                                          priceText: priceText,
                                           badge: isTrending ? 'TRENDING' : null,
                                         ),
                                         child: Stack(
@@ -260,12 +257,16 @@ class _DesignCatalogTabState extends State<DesignCatalogTab> {
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
                                             style: const TextStyle(fontSize: 11, color: Colors.black54)),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          priceText,
-                                          style: const TextStyle(
-                                              fontWeight: FontWeight.w800, color: AppTheme.woodPrimary),
-                                        ),
+                                        if (carving.isNotEmpty) ...[
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            carving,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                                fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.woodPrimary),
+                                          ),
+                                        ],
                                       ],
                                     ),
                                   ),

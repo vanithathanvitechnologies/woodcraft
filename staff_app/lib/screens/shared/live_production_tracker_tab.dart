@@ -15,6 +15,7 @@ class LiveProductionTrackerTab extends StatefulWidget {
 class _LiveProductionTrackerTabState extends State<LiveProductionTrackerTab> {
   List<dynamic> _orders = [];
   bool _loading = true;
+  bool _onlyPending = false;
   bool _onlyDelayed = false;
   bool _onlyBlockers = false;
 
@@ -28,7 +29,8 @@ class _LiveProductionTrackerTabState extends State<LiveProductionTrackerTab> {
     setState(() => _loading = true);
     try {
       final params = <String>[];
-      if (_onlyDelayed) params.add('delayed_only=true');
+      if (_onlyPending) params.add('pending_only=true');
+      if (_onlyDelayed) params.add('due_reached_only=true');
       if (_onlyBlockers) params.add('blocker_only=true');
       final qs = params.isNotEmpty ? '?${params.join('&')}' : '';
       final data = await ApiService.instance.get('/orders$qs');
@@ -231,26 +233,44 @@ class _LiveProductionTrackerTabState extends State<LiveProductionTrackerTab> {
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
           child: Row(
             children: [
-              FilterChip(
-                avatar: const Icon(Icons.schedule_rounded, size: 16),
-                label: const Text('Delayed'),
-                selected: _onlyDelayed,
-                onSelected: (v) {
-                  setState(() => _onlyDelayed = v);
-                  _load();
-                },
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      FilterChip(
+                        avatar: const Icon(Icons.hourglass_bottom_rounded, size: 16),
+                        label: const Text('Pending'),
+                        selected: _onlyPending,
+                        onSelected: (v) {
+                          setState(() => _onlyPending = v);
+                          _load();
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      FilterChip(
+                        avatar: const Icon(Icons.schedule_rounded, size: 16),
+                        label: const Text('Delivery Reached'),
+                        selected: _onlyDelayed,
+                        onSelected: (v) {
+                          setState(() => _onlyDelayed = v);
+                          _load();
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      FilterChip(
+                        avatar: const Icon(Icons.warning_amber_rounded, size: 16),
+                        label: const Text('Blockers'),
+                        selected: _onlyBlockers,
+                        onSelected: (v) {
+                          setState(() => _onlyBlockers = v);
+                          _load();
+                        },
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              const SizedBox(width: 8),
-              FilterChip(
-                avatar: const Icon(Icons.warning_amber_rounded, size: 16),
-                label: const Text('Blockers'),
-                selected: _onlyBlockers,
-                onSelected: (v) {
-                  setState(() => _onlyBlockers = v);
-                  _load();
-                },
-              ),
-              const Spacer(),
               IconButton.filledTonal(onPressed: _load, icon: const Icon(Icons.refresh_rounded)),
             ],
           ),
@@ -268,9 +288,11 @@ class _LiveProductionTrackerTabState extends State<LiveProductionTrackerTab> {
                         itemBuilder: (ctx, i) {
                           final o = Map<String, dynamic>.from(_orders[i] as Map);
                           final stage = int.tryParse('${o['current_stage']}') ?? 1;
-                          final isDelayed = o['is_delayed'] == true;
+                          final isDelayed = o['is_delivery_reached'] == true || o['is_delayed'] == true;
                           final hasBlocker = o['has_blocker'] == 1;
                           final isDone = stage == 8;
+                          final prodMember = (o['assigned_production_user_name'] ?? '').toString().trim();
+                          final prodPlace = (o['production_place'] ?? '').toString().trim();
 
                           return InkWell(
                             borderRadius: BorderRadius.circular(18),
@@ -292,7 +314,7 @@ class _LiveProductionTrackerTabState extends State<LiveProductionTrackerTab> {
                                                 fontWeight: FontWeight.w800, fontSize: 12, color: AppTheme.brass)),
                                       ),
                                       const SizedBox(width: 8),
-                                      if (isDelayed) UiKit.iconChip(Icons.schedule_rounded, 'Delayed', color: AppTheme.danger),
+                                      if (isDelayed) UiKit.iconChip(Icons.warning_amber_rounded, 'Delivery Reached', color: AppTheme.danger),
                                       if (hasBlocker)
                                         Padding(
                                           padding: const EdgeInsets.only(left: 6),
@@ -300,7 +322,7 @@ class _LiveProductionTrackerTabState extends State<LiveProductionTrackerTab> {
                                         ),
                                       const Spacer(),
                                       UiKit.iconChip(Icons.event_rounded, '${o['expected_delivery_date']}',
-                                          color: AppTheme.textMuted),
+                                          color: isDelayed ? AppTheme.danger : AppTheme.textMuted),
                                     ],
                                   ),
                                   const SizedBox(height: 10),
@@ -311,6 +333,10 @@ class _LiveProductionTrackerTabState extends State<LiveProductionTrackerTab> {
                                       UiKit.iconChip(Icons.person_rounded, '${o['customer_name']}', color: AppTheme.woodDark),
                                       UiKit.iconChip(Icons.door_front_door_rounded, '${o['woodwork_category']}'),
                                       UiKit.iconChip(Icons.forest_rounded, '${o['wood_species']}', color: AppTheme.woodAccent),
+                                      if (prodMember.isNotEmpty)
+                                        UiKit.iconChip(Icons.engineering_rounded, prodMember, color: AppTheme.woodPrimary),
+                                      if (prodPlace.isNotEmpty)
+                                        UiKit.iconChip(Icons.location_city_rounded, prodPlace, color: AppTheme.info),
                                     ],
                                   ),
                                   const SizedBox(height: 12),

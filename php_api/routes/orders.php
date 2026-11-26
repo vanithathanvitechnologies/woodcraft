@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/../helpers/notifications.php';
 
 function attachOrderRelationsPhp(PDO $pdo, array $order): array {
     $refIds = parseJsonField($order['reference_design_ids'] ?? null, []);
@@ -86,10 +87,34 @@ function handleOrdersRoutes(string $method, array $segments): void {
 
     // POST /api/orders/:id/dispatch
     if ($method === 'POST' && $id !== null && ($segments[1] ?? '') === 'dispatch') {
-        $pdo->prepare('UPDATE orders SET is_dispatched = 1 WHERE id = ?')->execute([$id]);
+        $body = getJsonBody();
+        $fields = ['is_dispatched = 1'];
+        $params = [];
+        if (array_key_exists('assigned_production_user_id', $body)) {
+            $fields[] = 'assigned_production_user_id = ?';
+            $params[] = !empty($body['assigned_production_user_id']) ? (int)$body['assigned_production_user_id'] : null;
+        }
+        if (array_key_exists('production_place', $body)) {
+            $place = trim((string)($body['production_place'] ?? ''));
+            $fields[] = 'production_place = ?';
+            $params[] = $place !== '' ? $place : null;
+        }
+        $params[] = $id;
+        $pdo->prepare('UPDATE orders SET ' . implode(', ', $fields) . ' WHERE id = ?')->execute($params);
         $pdo->prepare('INSERT INTO order_stage_history (order_id, stage_number, stage_name, updated_by, notes) VALUES (?, 1, ?, ?, ?)')
             ->execute([$id, getStageName(1), $authUser['id'], 'Dispatched to Production Team Workshop']);
-        jsonResponse(['success' => true, 'message' => 'Job dispatched to Production Team']);
+
+        $get = $pdo->prepare(
+            'SELECT o.*, pu.name AS assigned_production_user_name
+             FROM orders o LEFT JOIN users pu ON pu.id = o.assigned_production_user_id WHERE o.id = ?'
+        );
+        $get->execute([$id]);
+        $dispatched = $get->fetch();
+        if ($dispatched) {
+            notifyOrderAssignedPhp($pdo, $dispatched);
+            syncDeliveryNotificationsPhp($pdo);
+        }
+        jsonResponse(['success' => true, 'message' => 'Job dispatched to Production Team', 'order' => $dispatched]);
     }
 
     // GET /api/orders
@@ -98,17 +123,20 @@ function handleOrdersRoutes(string $method, array $segments): void {
                        c.name AS customer_name,
                        c.mobile AS customer_mobile,
                        c.delivery_address AS customer_address,
-                       u.name AS sales_user_name
+                       u.name AS sales_user_name,
+                       pu.name AS assigned_production_user_name,
+                       DATEDIFF(o.expected_delivery_date, CURDATE()) AS days_left
                 FROM orders o
                 JOIN customers c ON c.id = o.customer_id
                 LEFT JOIN users u ON u.id = o.sales_user_id
+                LEFT JOIN users pu ON pu.id = o.assigned_production_user_id
                 WHERE 1=1';
         $params = [];
 
         if (!empty($_GET['search'])) {
-            $sql .= ' AND (o.job_id LIKE ? OR c.name LIKE ? OR c.mobile LIKE ? OR o.woodwork_category LIKE ? OR o.wood_species LIKE ?)';
+            $sql .= ' AND (o.job_id LIKE ? OR c.name LIKE ? OR c.mobile LIKE ? OR o.woodwork_category LIKE ? OR o.wood_species LIKE ? OR o.production_place LIKE ? OR pu.name LIKE ?)';
             $like = '%' . trim($_GET['search']) . '%';
-            array_push($params, $like, $like, $like, $like, $like);
+            array_push($params, $like, $like, $like, $like, $like, $like, $like);
         }
         if (!empty($_GET['stage']) && $_GET['stage'] !== 'all') {
             $sql .= ' AND o.current_stage = ?';
@@ -126,8 +154,17 @@ function handleOrdersRoutes(string $method, array $segments): void {
             $sql .= ' AND o.expected_delivery_date = ?';
             $params[] = $_GET['delivery_date'];
         }
-        if (($_GET['delayed_only'] ?? '') === 'true') {
-            $sql .= ' AND o.expected_delivery_date < CURDATE() AND o.current_stage < 8';
+        if (($_GET['pending_only'] ?? '') === 'true') {
+            $sql .= ' AND o.current_stage < 8';
+        }
+        if (($_GET['completed_only'] ?? '') === 'true') {
+            $sql .= ' AND o.current_stage = 8';
+        }
+        if (($_GET['due_reached_only'] ?? '') === 'true' || ($_GET['delayed_only'] ?? '') === 'true') {
+            $sql .= ' AND o.expected_delivery_date <= CURDATE() AND o.current_stage < 8';
+        }
+        if (($_GET['due_soon_only'] ?? '') === 'true') {
+            $sql .= ' AND o.expected_delivery_date > CURDATE() AND DATEDIFF(o.expected_delivery_date, CURDATE()) <= 2 AND o.current_stage < 8';
         }
         if (($_GET['blocker_only'] ?? '') === 'true') {
             $sql .= ' AND o.has_blocker = 1';
@@ -142,7 +179,14 @@ function handleOrdersRoutes(string $method, array $segments): void {
         foreach ($rows as &$r) {
             $r['reference_design_ids'] = parseJsonField($r['reference_design_ids'] ?? null, []);
             $r['reference_elements'] = parseJsonField($r['reference_elements'] ?? null, []);
-            $r['is_delayed'] = ((int)$r['current_stage'] < 8 && $r['expected_delivery_date'] < $today);
+            $stageNum = (int)$r['current_stage'];
+            $isPending = $stageNum < 8;
+            $isReached = $isPending && ($r['expected_delivery_date'] <= $today);
+            $daysLeft = (int)($r['days_left'] ?? 0);
+            $r['is_pending'] = $isPending;
+            $r['is_delivery_reached'] = $isReached;
+            $r['is_delayed'] = $isReached;
+            $r['is_due_soon'] = $isPending && !$isReached && $daysLeft <= 2;
         }
         jsonResponse(['success' => true, 'orders' => $rows]);
     }
@@ -154,10 +198,13 @@ function handleOrdersRoutes(string $method, array $segments): void {
                     c.name AS customer_name,
                     c.mobile AS customer_mobile,
                     c.delivery_address AS customer_address,
-                    u.name AS sales_user_name
+                    u.name AS sales_user_name,
+                    pu.name AS assigned_production_user_name,
+                    DATEDIFF(o.expected_delivery_date, CURDATE()) AS days_left
              FROM orders o
              JOIN customers c ON c.id = o.customer_id
              LEFT JOIN users u ON u.id = o.sales_user_id
+             LEFT JOIN users pu ON pu.id = o.assigned_production_user_id
              WHERE o.id = ? LIMIT 1'
         );
         $stmt->execute([$id]);
@@ -215,8 +262,9 @@ function handleOrdersRoutes(string $method, array $segments): void {
                   leaf_type, wood_species, carving_pattern, polish_shade, hardware, quantity,
                   custom_notes, workshop_notes, reference_design_ids, reference_elements, ai_output_image_url,
                   total_cost, advance_amount, balance_amount,
-                  expected_delivery_date, priority, current_stage, current_stage_name, is_dispatched
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)'
+                  expected_delivery_date, priority, current_stage, current_stage_name, is_dispatched,
+                  assigned_production_user_id, production_place
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)'
             );
             $ins->execute([
                 $jobId,
@@ -245,6 +293,8 @@ function handleOrdersRoutes(string $method, array $segments): void {
                 $body['priority'] ?? 'Normal',
                 getStageName(1),
                 $isDispatched,
+                !empty($body['assigned_production_user_id']) ? (int)$body['assigned_production_user_id'] : null,
+                trim((string)($body['production_place'] ?? '')) !== '' ? trim((string)$body['production_place']) : null,
             ]);
             $orderId = (int)$pdo->lastInsertId();
 
@@ -259,11 +309,22 @@ function handleOrdersRoutes(string $method, array $segments): void {
             $pdo->commit();
 
             $get = $pdo->prepare(
-                'SELECT o.*, c.name AS customer_name, c.mobile AS customer_mobile, c.delivery_address AS customer_address
-                 FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.id = ?'
+                'SELECT o.*, c.name AS customer_name, c.mobile AS customer_mobile, c.delivery_address AS customer_address,
+                        pu.name AS assigned_production_user_name
+                 FROM orders o
+                 JOIN customers c ON c.id = o.customer_id
+                 LEFT JOIN users pu ON pu.id = o.assigned_production_user_id
+                 WHERE o.id = ?'
             );
             $get->execute([$orderId]);
-            jsonResponse(['success' => true, 'order' => attachOrderRelationsPhp($pdo, $get->fetch())], 201);
+            $createdOrder = $get->fetch();
+            if ($createdOrder) {
+                if ($isDispatched) {
+                    notifyOrderAssignedPhp($pdo, $createdOrder);
+                }
+                syncDeliveryNotificationsPhp($pdo);
+            }
+            jsonResponse(['success' => true, 'order' => attachOrderRelationsPhp($pdo, $createdOrder)], 201);
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
             jsonResponse(['success' => false, 'message' => 'Failed to create order: ' . $e->getMessage()], 500);
@@ -292,13 +353,38 @@ function handleOrdersRoutes(string $method, array $segments): void {
                 $params[] = $body[$k];
             }
         }
+        $assignmentUpdated = false;
+        if (array_key_exists('assigned_production_user_id', $body)) {
+            $fields[] = 'assigned_production_user_id = ?';
+            $params[] = !empty($body['assigned_production_user_id']) ? (int)$body['assigned_production_user_id'] : null;
+            $assignmentUpdated = true;
+        }
+        if (array_key_exists('production_place', $body)) {
+            $place = trim((string)($body['production_place'] ?? ''));
+            $fields[] = 'production_place = ?';
+            $params[] = $place !== '' ? $place : null;
+        }
         if (!$fields) jsonResponse(['success' => false, 'message' => 'No fields to update'], 400);
         $params[] = $id;
         $pdo->prepare('UPDATE orders SET ' . implode(', ', $fields) . ' WHERE id = ?')->execute($params);
 
-        $get = $pdo->prepare('SELECT * FROM orders WHERE id = ?');
+        $get = $pdo->prepare(
+            'SELECT o.*, c.name AS customer_name, c.mobile AS customer_mobile, c.delivery_address AS customer_address,
+                    pu.name AS assigned_production_user_name
+             FROM orders o
+             JOIN customers c ON c.id = o.customer_id
+             LEFT JOIN users pu ON pu.id = o.assigned_production_user_id
+             WHERE o.id = ?'
+        );
         $get->execute([$id]);
-        jsonResponse(['success' => true, 'order' => $get->fetch()]);
+        $updated = $get->fetch();
+        if ($updated) {
+            if ($assignmentUpdated) {
+                notifyOrderAssignedPhp($pdo, $updated);
+            }
+            syncDeliveryNotificationsPhp($pdo);
+        }
+        jsonResponse(['success' => true, 'order' => attachOrderRelationsPhp($pdo, $updated)]);
     }
 
     jsonResponse(['success' => false, 'message' => 'Orders endpoint not found'], 404);

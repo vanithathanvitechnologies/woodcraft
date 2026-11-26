@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import '../../core/app_theme.dart';
 import '../../services/api_service.dart';
 import '../../widgets/ui_kit.dart';
@@ -12,7 +11,6 @@ class OwnerReportsTab extends StatefulWidget {
 }
 
 class _OwnerReportsTabState extends State<OwnerReportsTab> {
-  final _inr = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
   Map<String, dynamic>? _report;
   bool _loading = true;
 
@@ -82,7 +80,8 @@ class _OwnerReportsTabState extends State<OwnerReportsTab> {
     final kpis = Map<String, dynamic>.from(_report!['kpis'] as Map);
     final byStage = (_report!['by_stage'] as List?) ?? [];
     final byWood = (_report!['by_wood'] as List?) ?? [];
-    final maxStage = byStage.fold<int>(1, (m, e) => (int.tryParse('${e['count']}') ?? 1) > m ? (int.tryParse('${e['count']}') ?? 1) : m);
+    final maxStage = byStage.fold<int>(
+        1, (m, e) => (int.tryParse('${e['count']}') ?? 1) > m ? (int.tryParse('${e['count']}') ?? 1) : m);
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -102,14 +101,12 @@ class _OwnerReportsTabState extends State<OwnerReportsTab> {
                   mainAxisSpacing: 10,
                 ),
                 children: [
-                  _kpiCard(Icons.account_balance_wallet_rounded, 'Total Revenue',
-                      _inr.format(double.tryParse('${kpis['total_revenue']}') ?? 0), AppTheme.woodDark),
-                  _kpiCard(Icons.check_circle_rounded, 'Advance Paid',
-                      _inr.format(double.tryParse('${kpis['total_advance']}') ?? 0), AppTheme.success),
-                  _kpiCard(Icons.pending_actions_rounded, 'Balance Due',
-                      _inr.format(double.tryParse('${kpis['total_balance']}') ?? 0), AppTheme.danger),
-                  _kpiCard(Icons.handyman_rounded, 'Active / Delayed',
-                      '${kpis['active_orders']} / ${kpis['delayed_orders']}', AppTheme.warning),
+                  _kpiCard(Icons.inventory_2_rounded, 'Total Orders', '${kpis['total_orders'] ?? 0}', AppTheme.woodDark),
+                  _kpiCard(Icons.hourglass_bottom_rounded, 'Pending Orders',
+                      '${kpis['pending_orders'] ?? kpis['active_orders'] ?? 0}', AppTheme.warning),
+                  _kpiCard(Icons.warning_amber_rounded, 'Delivery Reached',
+                      '${kpis['delivery_reached_incomplete_orders'] ?? kpis['delayed_orders'] ?? 0}', AppTheme.danger),
+                  _kpiCard(Icons.verified_rounded, 'Completed', '${kpis['completed_orders'] ?? 0}', AppTheme.success),
                 ],
               );
             },
@@ -162,7 +159,7 @@ class _OwnerReportsTabState extends State<OwnerReportsTab> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                UiKit.sectionHeader(Icons.forest_rounded, 'Revenue by Wood Species'),
+                UiKit.sectionHeader(Icons.forest_rounded, 'Orders by Wood Species'),
                 const SizedBox(height: 12),
                 if (byWood.isEmpty) const Text('No wood data yet.'),
                 ...byWood.map((w) => Padding(
@@ -190,16 +187,12 @@ class _OwnerReportsTabState extends State<OwnerReportsTab> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text('${w['wood_species']}', style: const TextStyle(fontWeight: FontWeight.w800)),
-                                  Text('${w['order_count']} order(s)',
+                                  Text('${w['pending_count'] ?? 0} pending • ${w['completed_count'] ?? 0} completed',
                                       style: const TextStyle(fontSize: 11.5, color: AppTheme.textMuted)),
                                 ],
                               ),
                             ),
-                            Text(
-                              _inr.format(double.tryParse('${w['revenue']}') ?? 0),
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.w900, fontSize: 15, color: AppTheme.woodPrimary),
-                            ),
+                            UiKit.iconChip(Icons.inventory_2_rounded, '${w['order_count'] ?? 0} orders'),
                           ],
                         ),
                       ),

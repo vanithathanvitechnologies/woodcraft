@@ -9,6 +9,7 @@ import CatalogPage from './pages/CatalogPage';
 import UsersPage from './pages/UsersPage';
 import CustomersPage from './pages/CustomersPage';
 import OrdersPage from './pages/OrdersPage';
+import NotificationsPage from './pages/NotificationsPage';
 
 export default function App() {
   const [user, setUser] = useState(() => (getToken() ? getSavedUser() : null));
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="/users" element={<UsersPage />} />
         <Route path="/customers" element={<CustomersPage />} />
         <Route path="/orders" element={<OrdersPage />} />
+        <Route path="/notifications" element={<NotificationsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

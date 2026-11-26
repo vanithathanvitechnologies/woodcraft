@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { API_BASE, apiRequest, formatINR, getToken } from '../api';
+import { API_BASE, apiRequest, getToken } from '../api';
 
 export default function ReportsPage() {
   const [report, setReport] = useState(null);
@@ -49,13 +49,17 @@ export default function ReportsPage() {
 
   const { kpis, by_stage, by_wood, by_category, by_salesperson } = report;
   const maxStageCount = Math.max(1, ...(by_stage || []).map((x) => Number(x.count)));
-  const maxWoodRev = Math.max(1, ...(by_wood || []).map((x) => Number(x.revenue)));
+  const maxWoodCount = Math.max(1, ...(by_wood || []).map((x) => Number(x.order_count)));
+
+  const pendingOrders = Number(kpis.pending_orders ?? kpis.active_orders ?? 0);
+  const reachedIncomplete = Number(kpis.delivery_reached_incomplete_orders ?? kpis.delayed_orders ?? 0);
+  const dueSoon = Number(kpis.due_soon_orders ?? 0);
 
   const statCards = [
     { label: 'Total Customers', value: kpis.total_customers || 0, sub: `${kpis.active_staff || 0} active staff`, icon: '👥', bg: '#e8f1fd', color: '#2563eb' },
-    { label: 'Total Orders', value: kpis.total_orders || 0, sub: formatINR(kpis.total_revenue), icon: '🛒', bg: '#ede9fe', color: '#6d28d9' },
-    { label: 'In Production', value: kpis.active_orders || 0, sub: `${kpis.delayed_orders || 0} delayed • ${kpis.blocked_orders || 0} blockers`, icon: '⚙️', bg: '#fef3c7', color: '#d97706' },
-    { label: 'Delivered / Ready', value: kpis.completed_orders || 0, sub: `Bal: ${formatINR(kpis.total_balance)}`, icon: '✅', bg: '#dcfce7', color: '#16a34a' },
+    { label: 'Pending Orders', value: pendingOrders, sub: `${dueSoon} due within 2 days`, icon: '⏳', bg: '#fef3c7', color: '#d97706' },
+    { label: 'Delivery Reached (Incomplete)', value: reachedIncomplete, sub: `${kpis.blocked_orders || 0} workshop blockers`, icon: '🚨', bg: '#fdecec', color: '#b83227' },
+    { label: 'Completed / Ready', value: kpis.completed_orders || 0, sub: `${kpis.total_orders || 0} total orders`, icon: '✅', bg: '#dcfce7', color: '#16a34a' },
   ];
 
   return (
@@ -63,7 +67,7 @@ export default function ReportsPage() {
       <div className="page-header">
         <div>
           <h2>WoodCraft Dashboard & Reports</h2>
-          <p>Real-time orders, revenue collections, workshop stage bottlenecks, and sales performance</p>
+          <p>Real-time pending orders, delivery alerts, workshop stage progress, and team activity</p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <button className="btn btn-outline" onClick={loadReport}>Refresh</button>
@@ -99,22 +103,6 @@ export default function ReportsPage() {
         ))}
       </div>
 
-      {/* Revenue Strip */}
-      <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
-        <div className="kpi-card">
-          <div className="label">Total Order Revenue</div>
-          <div className="value">{formatINR(kpis.total_revenue)}</div>
-        </div>
-        <div className="kpi-card">
-          <div className="label">Advance Collected</div>
-          <div className="value" style={{ color: '#1f7a4c' }}>{formatINR(kpis.total_advance)}</div>
-        </div>
-        <div className="kpi-card">
-          <div className="label">Pending Balance</div>
-          <div className="value" style={{ color: '#b83227' }}>{formatINR(kpis.total_balance)}</div>
-        </div>
-      </div>
-
       <div className="two-col">
         <div className="card">
           <h3 style={{ marginBottom: 16, color: '#3b210e' }}>Orders by Production Stage</h3>
@@ -134,7 +122,7 @@ export default function ReportsPage() {
         </div>
 
         <div className="card">
-          <h3 style={{ marginBottom: 16, color: '#3b210e' }}>Revenue by Wood Species</h3>
+          <h3 style={{ marginBottom: 16, color: '#3b210e' }}>Orders by Wood Species</h3>
           {(by_wood || []).length === 0 ? (
             <p style={{ color: '#6f6256' }}>No wood species data yet.</p>
           ) : (
@@ -142,9 +130,9 @@ export default function ReportsPage() {
               <div className="bar-row" key={w.wood_species}>
                 <div className="bar-label">{w.wood_species}</div>
                 <div className="bar-track">
-                  <div className="bar-fill" style={{ width: `${(Number(w.revenue) / maxWoodRev) * 100}%` }} />
+                  <div className="bar-fill" style={{ width: `${(Number(w.order_count) / maxWoodCount) * 100}%` }} />
                 </div>
-                <div className="bar-val">{formatINR(w.revenue)}</div>
+                <div className="bar-val">{w.order_count} orders</div>
               </div>
             ))
           )}
@@ -154,14 +142,14 @@ export default function ReportsPage() {
           <h3 style={{ marginBottom: 14, color: '#3b210e' }}>Woodwork Categories</h3>
           <table>
             <thead>
-              <tr><th>Category</th><th>Orders</th><th>Revenue</th></tr>
+              <tr><th>Category</th><th>Orders</th><th>Pending</th></tr>
             </thead>
             <tbody>
               {(by_category || []).map((c) => (
                 <tr key={c.woodwork_category}>
                   <td style={{ fontWeight: 600 }}>{c.woodwork_category}</td>
                   <td>{c.order_count}</td>
-                  <td style={{ fontWeight: 700 }}>{formatINR(c.revenue)}</td>
+                  <td style={{ fontWeight: 700, color: '#c87a12' }}>{c.pending_count ?? 0}</td>
                 </tr>
               ))}
             </tbody>
@@ -169,17 +157,17 @@ export default function ReportsPage() {
         </div>
 
         <div className="card">
-          <h3 style={{ marginBottom: 14, color: '#3b210e' }}>Sales Team Performance</h3>
+          <h3 style={{ marginBottom: 14, color: '#3b210e' }}>Sales Team Activity</h3>
           <table>
             <thead>
-              <tr><th>Sales Person</th><th>Orders</th><th>Total Value</th></tr>
+              <tr><th>Sales Person</th><th>Orders</th><th>Completed</th></tr>
             </thead>
             <tbody>
               {(by_salesperson || []).map((sp) => (
                 <tr key={sp.sales_name}>
                   <td style={{ fontWeight: 600 }}>{sp.sales_name}</td>
                   <td>{sp.order_count}</td>
-                  <td style={{ fontWeight: 700 }}>{formatINR(sp.revenue)}</td>
+                  <td style={{ fontWeight: 700, color: '#1f7a4c' }}>{sp.completed_count ?? 0}</td>
                 </tr>
               ))}
             </tbody>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { apiRequest, formatINR } from '../api';
+import { apiRequest } from '../api';
 
 export default function CustomersPage() {
   const [customers, setCustomers] = useState([]);
@@ -80,16 +80,14 @@ export default function CustomersPage() {
                 <th>Mobile (OTP Login)</th>
                 <th>Delivery Address</th>
                 <th>Orders</th>
-                <th>Total Order Value</th>
-                <th>Pending Balance</th>
                 <th>Registered</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={7}>Loading customers...</td></tr>
+                <tr><td colSpan={5}>Loading customers...</td></tr>
               ) : customers.length === 0 ? (
-                <tr><td colSpan={7}>No customers found.</td></tr>
+                <tr><td colSpan={5}>No customers found.</td></tr>
               ) : (
                 customers.map((c) => (
                   <tr key={c.id}>
@@ -97,10 +95,6 @@ export default function CustomersPage() {
                     <td><span className="badge badge-sales">{c.mobile}</span></td>
                     <td style={{ maxWidth: 260 }}>{c.delivery_address || '—'}</td>
                     <td style={{ fontWeight: 700 }}>{c.order_count || 0}</td>
-                    <td style={{ fontWeight: 600 }}>{formatINR(c.total_spent)}</td>
-                    <td style={{ color: Number(c.total_balance) > 0 ? '#b83227' : '#1f7a4c', fontWeight: 600 }}>
-                      {formatINR(c.total_balance)}
-                    </td>
                     <td>{String(c.created_at || '').slice(0, 10)}</td>
                   </tr>
                 ))

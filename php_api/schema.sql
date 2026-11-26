@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS orders (
   customer_id INT NOT NULL,
   sales_user_id INT NULL,
   assigned_production_user_id INT NULL,
+  production_place VARCHAR(180) NULL,
 
   woodwork_category VARCHAR(80) NOT NULL DEFAULT 'Door',
   width_inches DECIMAL(8, 2) NOT NULL DEFAULT 36.00,
@@ -148,4 +149,21 @@ CREATE TABLE IF NOT EXISTS order_progress_photos (
   INDEX idx_photos_order (order_id),
   CONSTRAINT fk_photos_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
   CONSTRAINT fk_photos_user FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  order_id INT NOT NULL,
+  type VARCHAR(50) NOT NULL,
+  title VARCHAR(180) NOT NULL,
+  message TEXT NOT NULL,
+  notify_for_date DATE NULL,
+  is_read TINYINT(1) NOT NULL DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_user_order_type_date (user_id, order_id, type, notify_for_date),
+  INDEX idx_notif_user_read (user_id, is_read),
+  INDEX idx_notif_order (order_id),
+  CONSTRAINT fk_notif_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_notif_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

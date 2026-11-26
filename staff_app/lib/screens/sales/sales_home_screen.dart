@@ -4,7 +4,6 @@ import '../login_screen.dart';
 import '../shared/customer_orders_tab.dart';
 import '../shared/live_production_tracker_tab.dart';
 import 'ai_combiner_tab.dart';
-import 'billing_estimator_tab.dart';
 import 'design_catalog_tab.dart';
 
 class SalesHomeScreen extends StatefulWidget {
@@ -20,7 +19,6 @@ class _SalesHomeScreenState extends State<SalesHomeScreen> {
   static const _titles = [
     'Design Catalog',
     'AI Design Combiner',
-    'Billing Estimator',
     'Orders & PDF Print',
     'Live Production Track',
   ];
@@ -28,7 +26,6 @@ class _SalesHomeScreenState extends State<SalesHomeScreen> {
   final _pages = const [
     DesignCatalogTab(),
     AiCombinerTab(),
-    BillingEstimatorTab(),
     CustomerOrdersTab(),
     LiveProductionTrackerTab(),
   ];
@@ -85,7 +82,6 @@ class _SalesHomeScreenState extends State<SalesHomeScreen> {
         destinations: const [
           NavigationDestination(icon: Icon(Icons.grid_view), label: 'Catalog'),
           NavigationDestination(icon: Icon(Icons.auto_awesome), label: 'AI Mix'),
-          NavigationDestination(icon: Icon(Icons.calculate), label: 'Billing'),
           NavigationDestination(icon: Icon(Icons.picture_as_pdf), label: 'Orders'),
           NavigationDestination(icon: Icon(Icons.track_changes), label: 'Track'),
         ],

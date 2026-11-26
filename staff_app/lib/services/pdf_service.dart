@@ -2,7 +2,6 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:http/http.dart' as http;
-import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -10,8 +9,6 @@ import '../widgets/door_pictorial_guide.dart';
 import 'api_service.dart';
 
 class PdfService {
-  static final _inr = NumberFormat.currency(locale: 'en_IN', symbol: 'Rs. ', decimalDigits: 0);
-
   static Future<void> _openPreview({
     required BuildContext? context,
     required String title,
@@ -66,8 +63,8 @@ class PdfService {
     }
   }
 
-  /// 1. Customer Copy PDF: Includes final design preview, full specs, pricing,
-  /// payment summary (Total, Advance, Balance), and expected delivery date.
+  /// 1. Customer Copy PDF: Includes final design preview, full specs,
+  /// and expected delivery date (no amount/pricing details shown).
   static Future<void> printCustomerCopy(Map<String, dynamic> order, {BuildContext? context}) async {
     final designImg = await _loadNetworkImage(order['ai_output_image_url']?.toString());
     final logoImg = await _loadAssetLogo();
@@ -121,7 +118,7 @@ class PdfService {
                                     pw.Text('WOODCRAFT CUSTOMIZER',
                                         style: pw.TextStyle(
                                             color: PdfColors.white, fontSize: 12, fontWeight: pw.FontWeight.bold)),
-                                    pw.Text('CUSTOMER ORDER COPY & ESTIMATE',
+                                    pw.Text('CUSTOMER ORDER COPY',
                                         style: pw.TextStyle(color: PdfColor.fromHex('#D4AF37'), fontSize: 8)),
                                   ],
                                 ),
@@ -163,7 +160,7 @@ class PdfService {
                                       pw.Text('WOODEN DOOR & FRAME CUSTOMIZER',
                                           style: pw.TextStyle(
                                               color: PdfColors.white, fontSize: 14, fontWeight: pw.FontWeight.bold)),
-                                      pw.Text('CUSTOMER ORDER COPY & ESTIMATE',
+                                      pw.Text('CUSTOMER ORDER COPY',
                                           style: pw.TextStyle(color: PdfColor.fromHex('#D4AF37'), fontSize: 9.5)),
                                     ],
                                   ),
@@ -262,63 +259,7 @@ class PdfService {
                     ),
                   ],
                 ),
-              pw.SizedBox(height: isNarrow ? 12 : 16),
-
-              // Payment Summary
-              pw.Container(
-                width: double.infinity,
-                padding: pw.EdgeInsets.all(isNarrow ? 10 : 14),
-                decoration: pw.BoxDecoration(
-                  color: PdfColor.fromHex('#F8F5F0'),
-                  border: pw.Border.all(color: PdfColor.fromHex('#6B3E1D')),
-                  borderRadius: pw.BorderRadius.circular(8),
-                ),
-                child: pw.Column(
-                  children: [
-                    pw.Row(
-                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                      children: [
-                        pw.Expanded(
-                          child: pw.Text('Total Order Amount',
-                              style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: isNarrow ? 9.5 : 12)),
-                        ),
-                        pw.Text(_inr.format(double.tryParse('${order['total_cost']}') ?? 0),
-                            style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: isNarrow ? 10 : 13)),
-                      ],
-                    ),
-                    pw.SizedBox(height: 5),
-                    pw.Row(
-                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                      children: [
-                        pw.Expanded(
-                          child: pw.Text('Advance Paid', style: pw.TextStyle(fontSize: isNarrow ? 9 : 11)),
-                        ),
-                        pw.Text(_inr.format(double.tryParse('${order['advance_amount']}') ?? 0),
-                            style: pw.TextStyle(fontSize: isNarrow ? 9 : 11)),
-                      ],
-                    ),
-                    pw.Divider(),
-                    pw.Row(
-                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                      children: [
-                        pw.Expanded(
-                          child: pw.Text('Balance Payable on Delivery',
-                              style: pw.TextStyle(
-                                  fontWeight: pw.FontWeight.bold,
-                                  color: PdfColors.red800,
-                                  fontSize: isNarrow ? 9.5 : 11.5)),
-                        ),
-                        pw.Text(_inr.format(double.tryParse('${order['balance_amount']}') ?? 0),
-                            style: pw.TextStyle(
-                                fontWeight: pw.FontWeight.bold,
-                                color: PdfColors.red800,
-                                fontSize: isNarrow ? 10 : 13)),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              pw.SizedBox(height: 14),
+              pw.SizedBox(height: isNarrow ? 10 : 14),
               pw.Text(
                 'Track your live production progress in the Customer App using your registered mobile number.',
                 style: pw.TextStyle(fontSize: isNarrow ? 8 : 9, color: PdfColors.grey700),
@@ -1698,6 +1639,10 @@ class PdfService {
         _specRow('Color / Polish', '${job['polish_shade'] ?? ''}', compact: compact),
         _specRow('Hardware Cutouts', '${job['hardware'] ?? '-'}', compact: compact),
         _specRow('Quantity', '${job['quantity'] ?? 1} Unit(s)', compact: compact),
+        if ((job['assigned_production_user_name'] ?? '').toString().trim().isNotEmpty)
+          _specRow('Production Lead', '${job['assigned_production_user_name']}', compact: compact),
+        if ((job['production_place'] ?? '').toString().trim().isNotEmpty)
+          _specRow('Production Place', '${job['production_place']}', compact: compact),
       ];
 
   static pw.Widget _specRow(String label, String value, {bool compact = false}) {

@@ -1,17 +1,21 @@
 <?php
 
 function handleUsersRoutes(string $method, array $segments): void {
-    $authUser = requireRoles(['admin', 'owner']);
     $pdo = getDb();
     $id = isset($segments[0]) && is_numeric($segments[0]) ? (int)$segments[0] : null;
 
     if ($method === 'GET' && $id === null) {
         $role = $_GET['role'] ?? '';
+        // Sales team needs active production members list when placing orders
+        $allowedRoles = ($role === 'production') ? ['admin', 'owner', 'sales'] : ['admin', 'owner'];
+        $authUser = requireRoles($allowedRoles);
         $search = trim((string)($_GET['search'] ?? ''));
 
         $sql = 'SELECT id, name, email, phone, role, is_active, created_at FROM users WHERE 1=1';
         $params = [];
-        if ($role && $role !== 'all') {
+        if (($authUser['role'] ?? '') === 'sales') {
+            $sql .= ' AND role = "production" AND is_active = 1';
+        } elseif ($role && $role !== 'all') {
             $sql .= ' AND role = ?';
             $params[] = $role;
         }
@@ -25,6 +29,8 @@ function handleUsersRoutes(string $method, array $segments): void {
         $stmt->execute($params);
         jsonResponse(['success' => true, 'users' => $stmt->fetchAll()]);
     }
+
+    $authUser = requireRoles(['admin', 'owner']);
 
     if ($method === 'POST' && $id === null) {
         $body = getJsonBody();

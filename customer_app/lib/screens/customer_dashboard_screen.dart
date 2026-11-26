@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import '../services/customer_api_service.dart';
 import '../widgets/suresh_timbers_showcase.dart';
 import 'mobile_login_screen.dart';
@@ -21,7 +20,6 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
   static const _success = Color(0xFF1B8A5A);
   static const _danger = Color(0xFFD13B34);
 
-  final _inr = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
   Map<String, dynamic>? _dashboard;
   bool _loading = true;
   String? _error;
@@ -198,12 +196,6 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                       _heroStat(Icons.handyman_rounded, 'In Craft', '${summary['in_progress'] ?? 0}'),
                       const SizedBox(width: 8),
                       _heroStat(Icons.verified_rounded, 'Ready', '${summary['completed'] ?? 0}'),
-                      const SizedBox(width: 8),
-                      _heroStat(
-                        Icons.account_balance_wallet_rounded,
-                        'Balance',
-                        _inr.format(double.tryParse('${summary['total_balance']}') ?? 0),
-                      ),
                     ],
                   ),
                 ],
@@ -422,16 +414,15 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                                       ),
                                     ),
                                     const SizedBox(height: 10),
-                                    // Payment Footer Strip
                                     Row(
                                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                       children: [
                                         Row(
                                           children: [
-                                            const Icon(Icons.receipt_long_rounded, size: 15, color: Colors.black54),
+                                            const Icon(Icons.event_available_rounded, size: 15, color: _woodPrimary),
                                             const SizedBox(width: 5),
                                             Text(
-                                              'Total: ${_inr.format(double.tryParse('${o['total_cost']}') ?? 0)}',
+                                              'Delivery: ${o['expected_delivery_date'] ?? '-'}',
                                               style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
                                             ),
                                           ],
@@ -439,13 +430,16 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                                         Container(
                                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                           decoration: BoxDecoration(
-                                            color: _danger.withValues(alpha: 0.09),
+                                            color: (isDone ? _success : _woodPrimary).withValues(alpha: 0.09),
                                             borderRadius: BorderRadius.circular(20),
                                           ),
                                           child: Text(
-                                            'Balance: ${_inr.format(double.tryParse('${o['balance_amount']}') ?? 0)}',
-                                            style: const TextStyle(
-                                                fontSize: 12, fontWeight: FontWeight.w800, color: _danger),
+                                            isDone ? 'Ready for Delivery' : 'Tap for Live Timeline',
+                                            style: TextStyle(
+                                              fontSize: 11.5,
+                                              fontWeight: FontWeight.w800,
+                                              color: isDone ? _success : _woodPrimary,
+                                            ),
                                           ),
                                         ),
                                       ],

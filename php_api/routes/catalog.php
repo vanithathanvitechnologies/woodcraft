@@ -51,7 +51,7 @@ function handleCatalogRoutes(string $method, array $segments): void {
         }
 
         $placeholders = implode(',', array_fill(0, count($refIds), '?'));
-        $stmt = $pdo->prepare("SELECT id, title, base_price, image_url, carving_style, wood_species FROM design_catalog WHERE id IN ($placeholders)");
+        $stmt = $pdo->prepare("SELECT id, title, image_url, carving_style, wood_species FROM design_catalog WHERE id IN ($placeholders)");
         $stmt->execute($refIds);
         $refDesigns = $stmt->fetchAll();
 
@@ -66,7 +66,6 @@ function handleCatalogRoutes(string $method, array $segments): void {
         $polishShade = (string)($body['polish_shade'] ?? 'Natural Teak Matte');
         $hardware = (string)($body['hardware'] ?? 'Antique Brass Handle & Mortise Lock');
         $customNotes = (string)($body['custom_notes'] ?? '');
-        $qty = max(1, (int)($body['quantity'] ?? 1));
 
         $titleById = [];
         foreach ($refDesigns as $d) {
@@ -96,21 +95,6 @@ function handleCatalogRoutes(string $method, array $segments): void {
             'prefix' => 'ai-combined',
         ]);
 
-        $avgBase = 28000;
-        if (count($refDesigns) > 0) {
-            $sum = 0;
-            foreach ($refDesigns as $d) $sum += (float)$d['base_price'];
-            $avgBase = $sum / count($refDesigns);
-        }
-
-        $areaSqFt = ($width * $height) / 144.0;
-        $areaFactor = max(0.8, $areaSqFt / 21.0);
-        $woodMult = getWoodMultiplier($woodSpecies);
-        $leafMult = ($leafType === 'Double Leaf') ? 1.45 : 1.0;
-        $hardwareCost = 4500;
-        $polishCost = 3500;
-        $unitCost = (int)round($avgBase * $areaFactor * $woodMult * $leafMult + $hardwareCost + $polishCost);
-
         jsonResponse([
             'success' => true,
             'ai_output_image_url' => '/uploads/ai-outputs/' . $rendered['filename'],
@@ -121,14 +105,6 @@ function handleCatalogRoutes(string $method, array $segments): void {
             'prompt_used' => $promptUsed,
             'engine' => $rendered['engine'] ?? 'php-real-photo-combiner',
             'reference_designs' => $refDesigns,
-            'cost_estimate' => [
-                'area_sqft' => round($areaSqFt, 2),
-                'unit_cost' => $unitCost,
-                'hardware_cost' => $hardwareCost,
-                'polish_cost' => $polishCost,
-                'quantity' => $qty,
-                'total_estimated_cost' => $unitCost * $qty,
-            ],
         ]);
     }
 
@@ -194,7 +170,7 @@ function handleCatalogRoutes(string $method, array $segments): void {
             $category,
             trim((string)($data['carving_style'] ?? '')),
             trim((string)($data['wood_species'] ?? 'Burma Teak')) ?: 'Burma Teak',
-            (float)($data['base_price'] ?? 25000),
+            (float)($data['base_price'] ?? 0),
             $primaryImage,
             json_encode($extraImages),
             trim((string)($data['tags'] ?? '')),
