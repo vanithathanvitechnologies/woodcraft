@@ -271,7 +271,10 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                           final o = Map<String, dynamic>.from(raw as Map);
                           final stage = int.tryParse('${o['current_stage']}') ?? 1;
                           final isDone = stage == 8;
-                          final pct = ((stage / 8) * 100).round();
+                          final doneSteps = int.tryParse('${o['process_done_count']}') ?? 0;
+                          const totalSteps = 31;
+                          final progressRatio = isDone ? 1.0 : (doneSteps / totalSteps).clamp(0.0, 1.0);
+                          final pct = (progressRatio * 100).round();
 
                           return Container(
                             margin: const EdgeInsets.only(bottom: 14),
@@ -382,7 +385,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                                               const SizedBox(width: 8),
                                               Expanded(
                                                 child: Text(
-                                                  'Stage $stage/8 • ${o['current_stage_name']}',
+                                                  'Process $doneSteps/$totalSteps • ${o['current_stage_name']}',
                                                   style: TextStyle(
                                                     fontSize: 12.5,
                                                     fontWeight: FontWeight.w800,
@@ -404,7 +407,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                                           ClipRRect(
                                             borderRadius: BorderRadius.circular(8),
                                             child: LinearProgressIndicator(
-                                              value: stage / 8,
+                                              value: progressRatio,
                                               minHeight: 7,
                                               color: isDone ? _success : _woodPrimary,
                                               backgroundColor: Colors.white,

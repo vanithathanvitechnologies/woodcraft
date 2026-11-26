@@ -42,6 +42,24 @@ function ensureAppSchemaPhp(PDO $pdo): void {
               CONSTRAINT fk_notif_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
         );
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS order_process_steps (
+              id INT AUTO_INCREMENT PRIMARY KEY,
+              order_id INT NOT NULL,
+              s_no TINYINT NOT NULL,
+              process_name VARCHAR(150) NOT NULL,
+              planning_date VARCHAR(40) NULL,
+              actual_date VARCHAR(40) NULL,
+              is_readonly TINYINT(1) NOT NULL DEFAULT 0,
+              updated_by INT NULL,
+              notes VARCHAR(255) NULL,
+              updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+              UNIQUE KEY uniq_order_sno (order_id, s_no),
+              INDEX idx_process_order (order_id),
+              CONSTRAINT fk_process_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+              CONSTRAINT fk_process_user FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+        );
     } catch (Throwable $e) {
         // Ignore if schema doesn't exist yet (e.g. during initial seed)
     }

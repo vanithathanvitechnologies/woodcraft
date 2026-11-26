@@ -28,6 +28,7 @@ export default function OrdersPage() {
   const [assignPlace, setAssignPlace] = useState('');
   const [assignSaving, setAssignSaving] = useState(false);
   const [assignMsg, setAssignMsg] = useState('');
+  const [busyStepSno, setBusyStepSno] = useState(null);
   const [lightboxImage, setLightboxImage] = useState(null);
 
   async function loadProductionTeam() {
@@ -102,6 +103,32 @@ export default function OrdersPage() {
     } finally {
       setAssignSaving(false);
     }
+  }
+
+  async function updateProcessStep(sNo, patch) {
+    if (!selectedOrder) return;
+    setBusyStepSno(sNo);
+    setError('');
+    try {
+      await apiRequest(`/production/jobs/${selectedOrder.id}/process`, {
+        method: 'PATCH',
+        body: JSON.stringify({ s_no: sNo, ...patch }),
+      });
+      await openOrderDetail(selectedOrder.id);
+      await loadOrders();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusyStepSno(null);
+    }
+  }
+
+  function todayShort() {
+    const d = new Date();
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yy = String(d.getFullYear()).slice(-2);
+    return `${dd}.${mm}.${yy}`;
   }
 
   return (
@@ -330,29 +357,119 @@ export default function OrdersPage() {
                 )}
 
                 <div>
-                  <h4 style={{ marginBottom: 10, color: '#3b210e' }}>Live Production Timeline</h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {(selectedOrder.stage_history || []).map((h) => (
-                      <div
-                        key={h.id}
-                        style={{
-                          padding: '9px 12px',
-                          background: h.is_blocker ? '#fdecec' : '#f8f5f0',
-                          borderRadius: 8,
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          fontSize: 13,
-                        }}
-                      >
-                        <div>
-                          <strong>Stage {h.stage_number}: {h.stage_name}</strong>
-                          <div style={{ color: '#6f6256' }}>{h.notes} {h.updated_by_name ? `— by ${h.updated_by_name}` : ''}</div>
-                        </div>
-                        <div style={{ color: '#6f6256', fontSize: 12 }}>{String(h.created_at || '').slice(0, 16)}</div>
-                      </div>
-                    ))}
+                  <h4 style={{ marginBottom: 10, color: '#3b210e' }}>
+                    Production Process Sheet (Rows 1–5 Auto-filled, 6–36 Status)
+                  </h4>
+                  <div className="table-wrap" style={{ maxHeight: 360, overflowY: 'auto', border: '1px solid #e6dfd5', borderRadius: 10 }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th style={{ width: 52 }}>S.No</th>
+                          <th>Process</th>
+                          <th style={{ width: 150 }}>Planning Date</th>
+                          <th style={{ width: 190 }}>Actual Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(selectedOrder.process_steps || []).map((step) => {
+                          const isHeaderRow = Number(step.s_no) <= 5 || Boolean(Number(step.is_readonly));
+                          const busy = busyStepSno === step.s_no;
+                          return (
+                            <tr
+                              key={step.s_no}
+                              style={{
+                                background: isHeaderRow
+                                  ? '#faf6f0'
+                                  : step.actual_date && step.actual_date !== '-'
+                                    ? '#eef9f2'
+                                    : '#fff',
+                              }}
+                            >
+                              <td style={{ fontWeight: 700 }}>{step.s_no}</td>
+                              <td style={{ fontWeight: isHeaderRow ? 700 : 500 }}>{step.process_name}</td>
+                              <td>
+                                {isHeaderRow ? (
+                                  ''
+                                ) : (
+                                  <input
+                                    className="input"
+                                    style={{ padding: '4px 8px', fontSize: 12 }}
+                                    placeholder="dd.mm.yy or -"
+                                    defaultValue={step.planning_date || ''}
+                                    disabled={busy}
+                                    onBlur={(e) => {
+                                      const val = e.target.value.trim();
+                                      if (val !== (step.planning_date || '')) {
+                                        updateProcessStep(step.s_no, { planning_date: val });
+                                      }
+                                    }}
+                                  />
+                                )}
+                              </td>
+                              <td>
+                                {isHeaderRow ? (
+                                  ''
+                                ) : (
+                                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                    <input
+                                      className="input"
+                                      style={{ padding: '4px 8px', fontSize: 12, flex: 1 }}
+                                      placeholder="dd.mm.yy"
+                                      defaultValue={step.actual_date || ''}
+                                      disabled={busy}
+                                      onBlur={(e) => {
+                                        const val = e.target.value.trim();
+                                        if (val !== (step.actual_date || '')) {
+                                          updateProcessStep(step.s_no, { actual_date: val });
+                                        }
+                                      }}
+                                    />
+                                    <button
+                                      type="button"
+                                      className="btn btn-outline btn-sm"
+                                      disabled={busy}
+                                      title="Mark done today"
+                                      onClick={() => updateProcessStep(step.s_no, { actual_date: todayShort() })}
+                                    >
+                                      Done
+                                    </button>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
+
+                {(selectedOrder.stage_history || []).length > 0 && (
+                  <div>
+                    <h4 style={{ marginBottom: 10, color: '#3b210e' }}>Timestamped Activity Log</h4>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {(selectedOrder.stage_history || []).map((h) => (
+                        <div
+                          key={h.id}
+                          style={{
+                            padding: '9px 12px',
+                            background: h.is_blocker ? '#fdecec' : '#f8f5f0',
+                            borderRadius: 8,
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            fontSize: 13,
+                          }}
+                        >
+                          <div>
+                            <strong>{h.stage_name}</strong>
+                            <div style={{ color: '#6f6256' }}>{h.notes} {h.updated_by_name ? `— by ${h.updated_by_name}` : ''}</div>
+                          </div>
+                          <div style={{ color: '#6f6256', fontSize: 12 }}>{String(h.created_at || '').slice(0, 16)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {(selectedOrder.progress_photos || []).length > 0 && (
                   <div>

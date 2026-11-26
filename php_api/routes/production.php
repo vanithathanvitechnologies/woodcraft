@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../helpers/notifications.php';
+require_once __DIR__ . '/../helpers/process_steps.php';
 
 // STRICT PRIVACY-PROTECTED COLUMNS ONLY — ZERO Customer Name, Mobile, Address, or Pricing!
 const RESTRICTED_JOB_COLS = '
@@ -48,6 +49,8 @@ function enrichRestrictedJobPhp(PDO $pdo, array $job): array {
     $job['reference_designs'] = $refDesigns;
     $job['stage_history'] = $hStmt->fetchAll();
     $job['progress_photos'] = $pStmt->fetchAll();
+    $job['process_steps'] = getOrderProcessStepsPhp($pdo, (int)$job['id'], true, $job);
+    $job['process_summary'] = summarizeProcessProgressPhp($job['process_steps']);
     return attachAiStyleGuideMetaPhp($job);
 }
 
@@ -73,6 +76,7 @@ function handleProductionRoutes(string $method, array $segments): void {
 
         $sql = 'SELECT ' . RESTRICTED_JOB_COLS . ',
                        DATEDIFF(o.expected_delivery_date, CURDATE()) AS days_left,
+                       (SELECT COUNT(*) FROM order_process_steps s WHERE s.order_id = o.id AND s.s_no >= 6 AND s.actual_date IS NOT NULL AND TRIM(s.actual_date) != "" AND TRIM(s.actual_date) != "-") AS process_done_count,
                        COALESCE((SELECT MAX(h.created_at) FROM order_stage_history h WHERE h.order_id = o.id), o.updated_at) AS last_progress_at,
                        CASE
                          WHEN o.current_stage = 8 THEN COALESCE(
@@ -111,6 +115,7 @@ function handleProductionRoutes(string $method, array $segments): void {
             $daysLeft = (int)($r['days_left'] ?? 0);
             $r['is_delivery_reached'] = ($stageNum < 8 && $r['expected_delivery_date'] <= $today);
             $r['is_due_soon'] = ($stageNum < 8 && $r['expected_delivery_date'] > $today && $daysLeft <= 2);
+            $r['process_total_steps'] = count(TRACKABLE_PROCESS_STEPS);
         }
         jsonResponse(['success' => true, 'stages' => PRODUCTION_STAGES, 'jobs' => $rows]);
     }
@@ -203,6 +208,52 @@ function handleProductionRoutes(string $method, array $segments): void {
         $stmt = $pdo->prepare('SELECT ' . RESTRICTED_JOB_COLS . ' FROM orders o LEFT JOIN users pu ON pu.id = o.assigned_production_user_id WHERE o.id = ?');
         $stmt->execute([$id]);
         jsonResponse(['success' => true, 'job' => enrichRestrictedJobPhp($pdo, $stmt->fetch())]);
+    }
+
+    // PATCH or POST /api/production/jobs/:id/process — Update Planning Date & Actual Date on rows 6..36
+    if (($method === 'PATCH' || $method === 'POST') && $id !== null && ($segments[2] ?? '') === 'process') {
+        $authUser = requireRoles(['production', 'owner', 'admin']);
+        $body = getJsonBody();
+
+        $stepsInput = [];
+        if (!empty($body['steps']) && is_array($body['steps'])) {
+            $stepsInput = $body['steps'];
+        } else {
+            $stepsInput = [$body];
+        }
+
+        $summary = null;
+        foreach ($stepsInput as $item) {
+            if (!is_array($item)) continue;
+            $sNo = (int)($item['s_no'] ?? 0);
+            if ($sNo < 6 || $sNo > 36) {
+                jsonResponse(['success' => false, 'message' => 'Rows 1 to 5 are auto-filled. Select process row 6 to 36.'], 400);
+            }
+            $hasPlan = array_key_exists('planning_date', $item);
+            $hasActual = array_key_exists('actual_date', $item);
+            $planDate = $hasPlan ? (string)($item['planning_date'] ?? '') : null;
+            $actualDate = $hasActual ? (string)($item['actual_date'] ?? '') : null;
+            $notes = array_key_exists('notes', $item) ? (string)($item['notes'] ?? '') : null;
+            $summary = updateOrderProcessStepPhp(
+                $pdo,
+                $id,
+                $sNo,
+                $planDate,
+                $actualDate,
+                (int)$authUser['id'],
+                $notes,
+                $hasPlan,
+                $hasActual
+            );
+        }
+
+        syncDeliveryNotificationsPhp($pdo);
+
+        $stmt = $pdo->prepare('SELECT ' . RESTRICTED_JOB_COLS . ' FROM orders o LEFT JOIN users pu ON pu.id = o.assigned_production_user_id WHERE o.id = ?');
+        $stmt->execute([$id]);
+        $jobRow = $stmt->fetch();
+        if (!$jobRow) jsonResponse(['success' => false, 'message' => 'Job not found'], 404);
+        jsonResponse(['success' => true, 'summary' => $summary, 'job' => enrichRestrictedJobPhp($pdo, $jobRow)]);
     }
 
     // POST /api/production/jobs/:id/blocker

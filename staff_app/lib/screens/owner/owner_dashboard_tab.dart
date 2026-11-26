@@ -126,7 +126,7 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
                     children: [
                       UiKit.iconChip(
                         UiKit.stageIcon(stage),
-                        'Stage $stage/8 • ${o['current_stage_name']}',
+                        'Steps ${o['process_done_count'] ?? 0}/${o['process_total_steps'] ?? 31} • ${o['current_stage_name']}',
                         color: stage >= 4 ? AppTheme.warning : AppTheme.info,
                       ),
                       UiKit.iconChip(

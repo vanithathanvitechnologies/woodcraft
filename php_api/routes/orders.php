@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../helpers/notifications.php';
+require_once __DIR__ . '/../helpers/process_steps.php';
 
 function attachOrderRelationsPhp(PDO $pdo, array $order): array {
     $refIds = parseJsonField($order['reference_design_ids'] ?? null, []);
@@ -34,6 +35,8 @@ function attachOrderRelationsPhp(PDO $pdo, array $order): array {
     $order['reference_designs'] = $refDesigns;
     $order['stage_history'] = $hStmt->fetchAll();
     $order['progress_photos'] = $pStmt->fetchAll();
+    $order['process_steps'] = getOrderProcessStepsPhp($pdo, (int)$order['id'], false, $order);
+    $order['process_summary'] = summarizeProcessProgressPhp($order['process_steps']);
     return attachAiStyleGuideMetaPhp($order);
 }
 
@@ -126,6 +129,7 @@ function handleOrdersRoutes(string $method, array $segments): void {
                        u.name AS sales_user_name,
                        pu.name AS assigned_production_user_name,
                        DATEDIFF(o.expected_delivery_date, CURDATE()) AS days_left,
+                       (SELECT COUNT(*) FROM order_process_steps s WHERE s.order_id = o.id AND s.s_no >= 6 AND s.actual_date IS NOT NULL AND TRIM(s.actual_date) != "" AND TRIM(s.actual_date) != "-") AS process_done_count,
                        COALESCE((SELECT MAX(h.created_at) FROM order_stage_history h WHERE h.order_id = o.id), o.updated_at) AS last_progress_at,
                        CASE
                          WHEN o.current_stage = 8 THEN COALESCE(
@@ -195,6 +199,7 @@ function handleOrdersRoutes(string $method, array $segments): void {
             $r['is_delivery_reached'] = $isReached;
             $r['is_delayed'] = $isReached;
             $r['is_due_soon'] = $isPending && !$isReached && $daysLeft <= 2;
+            $r['process_total_steps'] = count(TRACKABLE_PROCESS_STEPS);
         }
         jsonResponse(['success' => true, 'orders' => $rows]);
     }

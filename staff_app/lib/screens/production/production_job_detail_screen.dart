@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../core/app_theme.dart';
-import '../../core/constants.dart';
 import '../../services/api_service.dart';
 import '../../services/pdf_service.dart';
 import '../../widgets/door_pictorial_guide.dart';
+import '../../widgets/process_steps_table.dart';
 import '../../widgets/ui_kit.dart';
 
 class ProductionJobDetailScreen extends StatefulWidget {
@@ -19,6 +19,7 @@ class _ProductionJobDetailScreenState extends State<ProductionJobDetailScreen> {
   Map<String, dynamic>? _job;
   bool _loading = true;
   bool _updating = false;
+  int? _busyProcessSno;
 
   @override
   void initState() {
@@ -38,57 +39,27 @@ class _ProductionJobDetailScreenState extends State<ProductionJobDetailScreen> {
     }
   }
 
-  Future<void> _updateStage(int stageNumber) async {
-    final noteCtrl = TextEditingController();
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(UiKit.stageIcon(stageNumber), color: AppTheme.woodPrimary),
-            const SizedBox(width: 8),
-            Text('Stage $stageNumber'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(AppConstants.stageName(stageNumber), style: const TextStyle(fontWeight: FontWeight.w800)),
-            const SizedBox(height: 10),
-            TextField(
-              controller: noteCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Workshop Note (optional)',
-                prefixIcon: Icon(Icons.edit_note_rounded),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Update Stage')),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-
-    setState(() => _updating = true);
+  Future<void> _updateProcessStep(int sNo, {String? planningDate, String? actualDate}) async {
+    setState(() => _busyProcessSno = sNo);
     try {
-      final res = await ApiService.instance.patch('/production/jobs/${widget.jobId}/stage', {
-        'stage_number': stageNumber,
-        'notes': noteCtrl.text.trim(),
-      });
+      final body = <String, dynamic>{'s_no': sNo};
+      if (planningDate != null) body['planning_date'] = planningDate;
+      if (actualDate != null) body['actual_date'] = actualDate;
+
+      final res = await ApiService.instance.patch('/production/jobs/${widget.jobId}/process', body);
       setState(() => _job = Map<String, dynamic>.from(res['job'] as Map));
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Updated to Stage $stageNumber: ${AppConstants.stageName(stageNumber)}')),
+          SnackBar(
+            backgroundColor: AppTheme.success,
+            content: Text('Row $sNo updated! Status: ${_job?['current_stage_name'] ?? ''}'),
+          ),
         );
       }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
     } finally {
-      if (mounted) setState(() => _updating = false);
+      if (mounted) setState(() => _busyProcessSno = null);
     }
   }
 
@@ -212,7 +183,6 @@ class _ProductionJobDetailScreenState extends State<ProductionJobDetailScreen> {
     }
 
     final job = _job!;
-    final currentStage = int.tryParse('${job['current_stage']}') ?? 1;
     final refDesigns = (job['reference_designs'] as List?) ?? [];
     final photos = (job['progress_photos'] as List?) ?? [];
     final aiUrl = ApiService.instance.mediaUrl(job['ai_output_image_url']?.toString());
@@ -486,14 +456,14 @@ class _ProductionJobDetailScreenState extends State<ProductionJobDetailScreen> {
                 ),
               ),
 
-            // 8-Stage Work Status Updater with Stage Icons
+            // 36-Row Process List Updater (Rows 1-5 Auto-filled, Rows 6-36 Editable)
             UiKit.cardContainer(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   UiKit.sectionHeader(
-                    Icons.timeline_rounded,
-                    'Work Status & Stage Updater',
+                    Icons.playlist_add_check_rounded,
+                    'Production Process Sheet (36 Steps)',
                     trailing: TextButton.icon(
                       onPressed: _reportBlocker,
                       icon: Icon(
@@ -508,49 +478,12 @@ class _ProductionJobDetailScreenState extends State<ProductionJobDetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  ...AppConstants.productionStages.map((s) {
-                    final num = s['number'] as int;
-                    final done = num <= currentStage;
-                    final isCurrent = num == currentStage;
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: isCurrent ? AppTheme.woodPrimary.withValues(alpha: 0.08) : AppTheme.bg,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: isCurrent ? AppTheme.woodPrimary : AppTheme.border),
-                        ),
-                        child: Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 16,
-                              backgroundColor: isCurrent
-                                  ? AppTheme.woodPrimary
-                                  : (done ? AppTheme.success : Colors.grey.shade300),
-                              child: Icon(UiKit.stageIcon(num), size: 16, color: done ? Colors.white : Colors.black45),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text('${s['number']}. ${s['name']}',
-                                  style: TextStyle(fontSize: 13, fontWeight: isCurrent ? FontWeight.w800 : FontWeight.w600)),
-                            ),
-                            if (isCurrent)
-                              UiKit.iconChip(Icons.play_circle_fill_rounded, 'Current', color: AppTheme.woodPrimary)
-                            else
-                              OutlinedButton(
-                                style: OutlinedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                  minimumSize: Size.zero,
-                                ),
-                                onPressed: _updating ? null : () => _updateStage(num),
-                                child: Text(done ? 'Revert' : 'Set', style: const TextStyle(fontSize: 12)),
-                              ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }),
+                  ProcessStepsTable(
+                    steps: (job['process_steps'] as List?) ?? [],
+                    editable: true,
+                    busySno: _busyProcessSno,
+                    onUpdateStep: _updateProcessStep,
+                  ),
                 ],
               ),
             ),

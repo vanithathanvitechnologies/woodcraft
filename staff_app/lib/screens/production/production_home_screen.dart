@@ -241,6 +241,8 @@ class _ProductionHomeScreenState extends State<ProductionHomeScreen> with Single
                           itemBuilder: (_, i) {
                             final j = Map<String, dynamic>.from(_jobs[i] as Map);
                             final stage = int.tryParse('${j['current_stage']}') ?? 1;
+                            final doneSteps = int.tryParse('${j['process_done_count']}') ?? 0;
+                            final totalSteps = int.tryParse('${j['process_total_steps']}') ?? 31;
                             final pColor = UiKit.priorityColor(j['priority']?.toString());
                             final prodPlace = (j['production_place'] ?? '').toString().trim();
                             final isReached = j['is_delivery_reached'] == true;
@@ -344,8 +346,11 @@ class _ProductionHomeScreenState extends State<ProductionHomeScreen> with Single
                                       spacing: 8,
                                       runSpacing: 6,
                                       children: [
-                                        UiKit.iconChip(UiKit.stageIcon(stage), 'Stage $stage/8 • ${j['current_stage_name']}',
-                                            color: stage == 8 ? AppTheme.success : AppTheme.woodPrimary),
+                                        UiKit.iconChip(
+                                          UiKit.stageIcon(stage),
+                                          'Steps $doneSteps/$totalSteps • ${j['current_stage_name']}',
+                                          color: stage == 8 ? AppTheme.success : AppTheme.woodPrimary,
+                                        ),
                                         if (stage == 8)
                                           UiKit.iconChip(
                                             Icons.task_alt_rounded,

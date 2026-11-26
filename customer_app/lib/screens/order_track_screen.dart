@@ -18,7 +18,6 @@ class _OrderTrackScreenState extends State<OrderTrackScreen> {
   static const _success = Color(0xFF1B8A5A);
 
   Map<String, dynamic>? _order;
-  List<dynamic> _stages = [];
   bool _loading = true;
 
   @override
@@ -33,35 +32,11 @@ class _OrderTrackScreenState extends State<OrderTrackScreen> {
       final res = await CustomerApiService.instance.getOrderDetail(widget.orderId);
       setState(() {
         _order = Map<String, dynamic>.from(res['order'] as Map);
-        _stages = (res['stages'] as List?) ?? [];
       });
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
     } finally {
       if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  IconData _stageIcon(int stage) {
-    switch (stage) {
-      case 1:
-        return Icons.fiber_new_rounded;
-      case 2:
-        return Icons.carpenter_rounded;
-      case 3:
-        return Icons.grid_view_rounded;
-      case 4:
-        return Icons.auto_awesome_rounded;
-      case 5:
-        return Icons.handyman_rounded;
-      case 6:
-        return Icons.brush_rounded;
-      case 7:
-        return Icons.verified_rounded;
-      case 8:
-        return Icons.local_shipping_rounded;
-      default:
-        return Icons.schedule_rounded;
     }
   }
 
@@ -154,8 +129,7 @@ class _OrderTrackScreenState extends State<OrderTrackScreen> {
     }
 
     final o = _order!;
-    final currentStage = int.tryParse('${o['current_stage']}') ?? 1;
-    final history = (o['stage_history'] as List?) ?? [];
+    final processSteps = (o['process_steps'] as List?) ?? [];
     final photos = (o['progress_photos'] as List?) ?? [];
     final imgUrl = CustomerApiService.instance.mediaUrl(o['ai_output_image_url']?.toString());
 
@@ -264,7 +238,7 @@ class _OrderTrackScreenState extends State<OrderTrackScreen> {
             ),
             const SizedBox(height: 14),
 
-            // 8-Stage Visual Icon Timeline
+            // 36-Row Live Process Status Table
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -275,115 +249,130 @@ class _OrderTrackScreenState extends State<OrderTrackScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _sectionTitle(Icons.timeline_rounded, 'Live 8-Stage Craft Timeline'),
-                  const SizedBox(height: 14),
-                  ...List.generate(_stages.length, (index) {
-                    final s = _stages[index];
-                    final num = int.tryParse('${s['number']}') ?? (index + 1);
-                    final done = num <= currentStage;
-                    final isCurrent = num == currentStage;
-                    final isLast = index == _stages.length - 1;
-                    final matched = history.where((h) => int.tryParse('${h['stage_number']}') == num).toList();
-                    final ts = matched.isNotEmpty ? '${matched.last['created_at']}' : null;
-
-                    return IntrinsicHeight(
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                  _sectionTitle(Icons.playlist_add_check_rounded, 'Live Process Status (36 Steps)'),
+                  const SizedBox(height: 12),
+                  if (processSteps.isEmpty)
+                    const Text('Process steps will appear shortly.', style: TextStyle(color: Colors.black54))
+                  else
+                    Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(color: _border),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: Column(
                         children: [
-                          SizedBox(
-                            width: 38,
-                            child: Column(
+                          Container(
+                            color: _woodDark,
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                            child: const Row(
                               children: [
-                                Container(
-                                  width: 34,
-                                  height: 34,
-                                  decoration: BoxDecoration(
-                                    color: isCurrent
-                                        ? _woodPrimary
-                                        : (done ? _success : Colors.grey.shade200),
-                                    shape: BoxShape.circle,
-                                    boxShadow: isCurrent
-                                        ? [BoxShadow(color: _woodPrimary.withValues(alpha: 0.35), blurRadius: 8)]
-                                        : null,
-                                  ),
-                                  child: Icon(
-                                    _stageIcon(num),
-                                    size: 17,
-                                    color: done ? Colors.white : Colors.black38,
-                                  ),
+                                SizedBox(
+                                  width: 30,
+                                  child: Text('S.No',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800)),
                                 ),
-                                if (!isLast)
-                                  Expanded(
-                                    child: Container(
-                                      width: 2.5,
-                                      margin: const EdgeInsets.symmetric(vertical: 3),
-                                      color: num < currentStage ? _success : Colors.grey.shade200,
-                                    ),
-                                  ),
+                                SizedBox(width: 6),
+                                Expanded(
+                                  flex: 5,
+                                  child: Text('Process',
+                                      style: TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w800)),
+                                ),
+                                SizedBox(width: 4),
+                                Expanded(
+                                  flex: 2,
+                                  child: Text('Plan',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(color: _brass, fontSize: 11, fontWeight: FontWeight.w800)),
+                                ),
+                                SizedBox(width: 4),
+                                Expanded(
+                                  flex: 2,
+                                  child: Text('Actual',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(color: _brass, fontSize: 11, fontWeight: FontWeight.w800)),
+                                ),
                               ],
                             ),
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Padding(
-                              padding: const EdgeInsets.only(bottom: 16),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                decoration: BoxDecoration(
-                                  color: isCurrent ? _woodPrimary.withValues(alpha: 0.08) : _bg,
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: isCurrent ? _woodPrimary.withValues(alpha: 0.35) : _border,
+                          ...processSteps.whereType<Map>().map((row) {
+                            final sNo = int.tryParse('${row['s_no']}') ?? 0;
+                            final isHeaderRow = sNo <= 5 || row['is_readonly'] == 1;
+                            final plan = (row['planning_date'] ?? '').toString().trim();
+                            final actual = (row['actual_date'] ?? '').toString().trim();
+                            final isDone = !isHeaderRow && actual.isNotEmpty && actual != '-';
+                            return Container(
+                              decoration: BoxDecoration(
+                                color: isHeaderRow
+                                    ? const Color(0xFFFAF5EE)
+                                    : (isDone ? const Color(0xFFEAF7EF) : Colors.white),
+                                border: const Border(top: BorderSide(color: _border)),
+                              ),
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+                              child: Row(
+                                children: [
+                                  SizedBox(
+                                    width: 30,
+                                    child: Text(
+                                      '$sNo',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: isHeaderRow ? _woodDark : Colors.black87,
+                                      ),
+                                    ),
                                   ),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    flex: 5,
+                                    child: Row(
                                       children: [
                                         Expanded(
                                           child: Text(
-                                            '${s['name']}',
+                                            '${row['process_name'] ?? ''}',
                                             style: TextStyle(
-                                              fontSize: 13.5,
-                                              fontWeight: isCurrent ? FontWeight.w800 : FontWeight.w700,
-                                              color: isCurrent ? _woodPrimary : (done ? _woodDark : Colors.black45),
+                                              fontSize: 12,
+                                              fontWeight: isHeaderRow || isDone ? FontWeight.w700 : FontWeight.w500,
+                                              color: isHeaderRow ? _woodDark : Colors.black87,
                                             ),
                                           ),
                                         ),
-                                        if (isCurrent)
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                            decoration: BoxDecoration(
-                                              color: _woodPrimary,
-                                              borderRadius: BorderRadius.circular(12),
-                                            ),
-                                            child: const Text('IN PROGRESS',
-                                                style: TextStyle(color: Colors.white, fontSize: 9.5, fontWeight: FontWeight.w800)),
-                                          )
-                                        else if (done)
-                                          const Icon(Icons.check_circle_rounded, size: 17, color: _success),
+                                        if (isDone)
+                                          const Icon(Icons.check_circle_rounded, size: 14, color: _success),
                                       ],
                                     ),
-                                    if (ts != null) ...[
-                                      const SizedBox(height: 4),
-                                      Row(
-                                        children: [
-                                          const Icon(Icons.access_time_rounded, size: 12, color: Colors.black45),
-                                          const SizedBox(width: 4),
-                                          Text(ts, style: const TextStyle(fontSize: 11, color: Colors.black54)),
-                                        ],
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    flex: 2,
+                                    child: Text(
+                                      isHeaderRow ? '' : (plan.isNotEmpty ? plan : '-'),
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(fontSize: 11, color: Colors.black54, fontWeight: FontWeight.w600),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    flex: 2,
+                                    child: Text(
+                                      isHeaderRow ? '' : (actual.isNotEmpty ? actual : '-'),
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: isDone ? _success : Colors.black45,
+                                        fontWeight: isDone ? FontWeight.w800 : FontWeight.w500,
                                       ),
-                                    ],
-                                  ],
-                                ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ),
-                          ),
+                            );
+                          }),
                         ],
                       ),
-                    );
-                  }),
+                    ),
                 ],
               ),
             ),
