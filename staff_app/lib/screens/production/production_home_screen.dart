@@ -315,6 +315,11 @@ class _ProductionHomeScreenState extends State<ProductionHomeScreen> with Single
                                                   UiKit.iconChip(Icons.forest_rounded, '${j['wood_species']}'),
                                                   UiKit.iconChip(Icons.straighten_rounded, '${j['width_inches']}"×${j['height_inches']}"'),
                                                   UiKit.iconChip(Icons.inventory_2_rounded, 'Qty ${j['quantity']}', color: AppTheme.info),
+                                                  UiKit.iconChip(
+                                                    Icons.event_available_rounded,
+                                                    'Delivery Date: ${j['expected_delivery_date'] ?? '-'}',
+                                                    color: isReached ? AppTheme.danger : (isDueSoon ? AppTheme.warning : AppTheme.woodPrimary),
+                                                  ),
                                                   if (prodPlace.isNotEmpty)
                                                     UiKit.iconChip(Icons.location_city_rounded, prodPlace, color: AppTheme.woodPrimary),
                                                   if (isReached)
@@ -333,13 +338,12 @@ class _ProductionHomeScreenState extends State<ProductionHomeScreen> with Single
                                       ],
                                     ),
                                     const SizedBox(height: 12),
-                                    Row(
-                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    Wrap(
+                                      spacing: 8,
+                                      runSpacing: 6,
                                       children: [
                                         UiKit.iconChip(UiKit.stageIcon(stage), 'Stage $stage/8 • ${j['current_stage_name']}',
                                             color: stage == 8 ? AppTheme.success : AppTheme.woodPrimary),
-                                        UiKit.iconChip(Icons.event_available_rounded, '${j['expected_delivery_date']}',
-                                            color: AppTheme.danger),
                                       ],
                                     ),
                                   ],
