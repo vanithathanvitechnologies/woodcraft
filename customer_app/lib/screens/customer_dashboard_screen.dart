@@ -133,11 +133,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            // 1. Suresh Timbers Royal Promotional Hero Banner
-            const SureshTimbersPromoHero(),
-            const SizedBox(height: 16),
-
-            // 2. Customer Welcome & Order Summary Banner
+            // 1. Customer Welcome & Order Summary Banner
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -463,7 +459,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
 
             const SizedBox(height: 22),
 
-            // 4. Complete Suresh Timbers Achievements, Certifications, Showcase, Clients & Contact
+            // 3. Signature Royal Creations & Certifications Showcase
             const SureshTimbersShowcaseSection(),
           ],
         ),
