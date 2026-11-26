@@ -246,6 +246,8 @@ class _ProductionHomeScreenState extends State<ProductionHomeScreen> with Single
                             final isReached = j['is_delivery_reached'] == true;
                             final isDueSoon = j['is_due_soon'] == true;
                             final daysLeft = int.tryParse('${j['days_left']}') ?? 0;
+                            final lastProgressText = UiKit.formatDateTime(j['last_progress_at'] ?? j['updated_at']);
+                            final completedText = UiKit.formatDateTime(j['completed_at'] ?? j['last_progress_at'] ?? j['updated_at']);
 
                             return InkWell(
                               borderRadius: BorderRadius.circular(18),
@@ -344,6 +346,18 @@ class _ProductionHomeScreenState extends State<ProductionHomeScreen> with Single
                                       children: [
                                         UiKit.iconChip(UiKit.stageIcon(stage), 'Stage $stage/8 • ${j['current_stage_name']}',
                                             color: stage == 8 ? AppTheme.success : AppTheme.woodPrimary),
+                                        if (stage == 8)
+                                          UiKit.iconChip(
+                                            Icons.task_alt_rounded,
+                                            'Completed Date: $completedText',
+                                            color: AppTheme.success,
+                                          )
+                                        else
+                                          UiKit.iconChip(
+                                            Icons.update_rounded,
+                                            'Last Progress: $lastProgressText',
+                                            color: AppTheme.info,
+                                          ),
                                       ],
                                     ),
                                   ],

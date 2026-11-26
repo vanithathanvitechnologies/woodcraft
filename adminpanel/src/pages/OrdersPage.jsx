@@ -190,11 +190,15 @@ export default function OrdersPage() {
                       <td>
                         <div style={{ fontWeight: 600 }}>{o.customer_name}</div>
                         <div style={{ fontSize: 12, color: '#6f6256' }}>{o.customer_mobile}</div>
+                        {o.customer_address && (
+                          <div style={{ fontSize: 11.5, color: '#6f6256' }}>Area: {o.customer_address}</div>
+                        )}
                       </td>
                       <td>
                         <div style={{ fontWeight: 600 }}>{o.woodwork_category}</div>
                         <div style={{ fontSize: 12, color: '#6f6256' }}>
-                          {o.wood_species} • {o.width_inches}&quot;×{o.height_inches}&quot; • {o.leaf_type}
+                          {o.wood_species} • {o.width_inches}&quot;×{o.height_inches}&quot; (
+                          {((Number(o.width_inches) * Number(o.height_inches)) / 144).toFixed(1)} sq.ft) • {o.leaf_type}
                         </div>
                       </td>
                       <td>
@@ -205,6 +209,11 @@ export default function OrdersPage() {
                       </td>
                       <td>
                         <div style={{ fontWeight: 600 }}>{o.expected_delivery_date}</div>
+                        {o.last_progress_at && (
+                          <div style={{ fontSize: 11.5, color: '#6f6256' }}>
+                            Progress: {String(o.last_progress_at).slice(0, 16)}
+                          </div>
+                        )}
                         {isReached && <span className="badge badge-danger">Delivery Reached</span>}
                         {!isReached && o.is_due_soon && <span className="badge badge-warning">Due Soon</span>}
                         {Boolean(o.has_blocker) && <span className="badge badge-warning" style={{ marginLeft: 4 }}>Blocker</span>}

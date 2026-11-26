@@ -72,7 +72,15 @@ function handleProductionRoutes(string $method, array $segments): void {
         $search = trim((string)($_GET['search'] ?? ''));
 
         $sql = 'SELECT ' . RESTRICTED_JOB_COLS . ',
-                       DATEDIFF(o.expected_delivery_date, CURDATE()) AS days_left
+                       DATEDIFF(o.expected_delivery_date, CURDATE()) AS days_left,
+                       COALESCE((SELECT MAX(h.created_at) FROM order_stage_history h WHERE h.order_id = o.id), o.updated_at) AS last_progress_at,
+                       CASE
+                         WHEN o.current_stage = 8 THEN COALESCE(
+                           (SELECT MAX(h.created_at) FROM order_stage_history h WHERE h.order_id = o.id AND h.stage_number = 8),
+                           o.updated_at
+                         )
+                         ELSE NULL
+                       END AS completed_at
                 FROM orders o
                 LEFT JOIN users pu ON pu.id = o.assigned_production_user_id
                 WHERE o.is_dispatched = 1';

@@ -52,6 +52,10 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
     final stage = int.tryParse('${o['current_stage']}') ?? 1;
     final prodMember = (o['assigned_production_user_name'] ?? '').toString().trim();
     final prodPlace = (o['production_place'] ?? '').toString().trim();
+    final custAddr = (o['customer_address'] ?? '').toString().trim();
+    final custMobile = (o['customer_mobile'] ?? '').toString().trim();
+    final areaText = UiKit.formatAreaSqFt(o['width_inches'], o['height_inches']);
+    final lastProgressText = UiKit.formatDateTime(o['last_progress_at'] ?? o['updated_at']);
     final daysLeft = int.tryParse('${o['days_left']}') ?? 0;
 
     return InkWell(
@@ -98,14 +102,14 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
                     children: [
                       Text('#${o['job_id']}',
                           style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: AppTheme.woodDark)),
-                      const Spacer(),
-                      UiKit.iconChip(
-                        Icons.event_available_rounded,
-                        highlightDueReached
-                            ? (daysLeft == 0 ? 'Reached Today' : 'Overdue ${daysLeft.abs()}d')
-                            : '${o['expected_delivery_date']}',
-                        color: highlightDueReached ? AppTheme.danger : AppTheme.textMuted,
-                      ),
+                      if (highlightDueReached) ...[
+                        const SizedBox(width: 8),
+                        UiKit.iconChip(
+                          Icons.warning_amber_rounded,
+                          daysLeft == 0 ? 'Reached Today' : 'Overdue ${daysLeft.abs()}d',
+                          color: AppTheme.danger,
+                        ),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 3),
@@ -115,7 +119,7 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppTheme.textDark),
                   ),
-                  const SizedBox(height: 5),
+                  const SizedBox(height: 6),
                   Wrap(
                     spacing: 6,
                     runSpacing: 5,
@@ -125,6 +129,21 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
                         'Stage $stage/8 • ${o['current_stage_name']}',
                         color: stage >= 4 ? AppTheme.warning : AppTheme.info,
                       ),
+                      UiKit.iconChip(
+                        Icons.event_available_rounded,
+                        'Delivery: ${o['expected_delivery_date'] ?? '-'}',
+                        color: highlightDueReached ? AppTheme.danger : AppTheme.woodPrimary,
+                      ),
+                      if (custMobile.isNotEmpty)
+                        UiKit.iconChip(Icons.phone_rounded, custMobile, color: AppTheme.info),
+                      UiKit.iconChip(
+                        Icons.straighten_rounded,
+                        'Area: ${o['width_inches']}"×${o['height_inches']}" ($areaText)',
+                        color: AppTheme.woodDark,
+                      ),
+                      if (custAddr.isNotEmpty)
+                        UiKit.iconChip(Icons.location_on_rounded, 'Location: $custAddr', color: AppTheme.textMuted),
+                      UiKit.iconChip(Icons.update_rounded, 'Last Progress: $lastProgressText', color: AppTheme.woodAccent),
                       if (prodMember.isNotEmpty)
                         UiKit.iconChip(Icons.engineering_rounded, prodMember, color: AppTheme.woodPrimary),
                       if (prodPlace.isNotEmpty)

@@ -402,6 +402,9 @@ class _CustomerOrdersTabState extends State<CustomerOrdersTab> {
                           final isDueSoon = o['is_due_soon'] == true;
                           final prodMember = (o['assigned_production_user_name'] ?? '').toString().trim();
                           final prodPlace = (o['production_place'] ?? '').toString().trim();
+                          final custAddr = (o['customer_address'] ?? '').toString().trim();
+                          final areaText = UiKit.formatAreaSqFt(o['width_inches'], o['height_inches']);
+                          final lastProgressText = UiKit.formatDateTime(o['last_progress_at'] ?? o['updated_at']);
                           final daysLeft = int.tryParse('${o['days_left']}') ?? 0;
 
                           return InkWell(
@@ -496,6 +499,18 @@ class _CustomerOrdersTabState extends State<CustomerOrdersTab> {
                                         Icons.event_available_rounded,
                                         'Delivery: ${o['expected_delivery_date']}',
                                         color: isReached ? AppTheme.danger : AppTheme.textMuted,
+                                      ),
+                                      UiKit.iconChip(
+                                        Icons.straighten_rounded,
+                                        'Area: ${o['width_inches']}"×${o['height_inches']}" ($areaText)',
+                                        color: AppTheme.woodDark,
+                                      ),
+                                      if (custAddr.isNotEmpty)
+                                        UiKit.iconChip(Icons.location_on_rounded, 'Location: $custAddr', color: AppTheme.textMuted),
+                                      UiKit.iconChip(
+                                        Icons.update_rounded,
+                                        'Last Progress: $lastProgressText',
+                                        color: AppTheme.woodAccent,
                                       ),
                                     ],
                                   ),

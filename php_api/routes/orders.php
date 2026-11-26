@@ -125,7 +125,15 @@ function handleOrdersRoutes(string $method, array $segments): void {
                        c.delivery_address AS customer_address,
                        u.name AS sales_user_name,
                        pu.name AS assigned_production_user_name,
-                       DATEDIFF(o.expected_delivery_date, CURDATE()) AS days_left
+                       DATEDIFF(o.expected_delivery_date, CURDATE()) AS days_left,
+                       COALESCE((SELECT MAX(h.created_at) FROM order_stage_history h WHERE h.order_id = o.id), o.updated_at) AS last_progress_at,
+                       CASE
+                         WHEN o.current_stage = 8 THEN COALESCE(
+                           (SELECT MAX(h.created_at) FROM order_stage_history h WHERE h.order_id = o.id AND h.stage_number = 8),
+                           o.updated_at
+                         )
+                         ELSE NULL
+                       END AS completed_at
                 FROM orders o
                 JOIN customers c ON c.id = o.customer_id
                 LEFT JOIN users u ON u.id = o.sales_user_id

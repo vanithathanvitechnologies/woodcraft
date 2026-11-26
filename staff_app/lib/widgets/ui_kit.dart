@@ -1,7 +1,25 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../core/app_theme.dart';
 
 class UiKit {
+  static String formatDateTime(dynamic raw) {
+    final s = (raw ?? '').toString().trim();
+    if (s.isEmpty || s == 'null') return '-';
+    final normalized = s.contains('T') ? s : s.replaceFirst(' ', 'T');
+    final dt = DateTime.tryParse(normalized);
+    if (dt == null) return s;
+    return DateFormat('yyyy-MM-dd hh:mm a').format(dt.toLocal());
+  }
+
+  static String formatAreaSqFt(dynamic widthRaw, dynamic heightRaw) {
+    final w = double.tryParse('${widthRaw ?? ''}') ?? 0;
+    final h = double.tryParse('${heightRaw ?? ''}') ?? 0;
+    if (w <= 0 || h <= 0) return '-';
+    final sqFt = (w * h) / 144.0;
+    return '${sqFt.toStringAsFixed(1)} sq.ft';
+  }
+
   static IconData stageIcon(int stage) {
     switch (stage) {
       case 1:
